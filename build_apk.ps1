@@ -1,14 +1,18 @@
-# Script para compilar la aplicación y actualizar la APK en la raíz del proyecto
+# Script para compilar la aplicación en modo RELEASE firmada y actualizar la APK en la raíz
 $env:JAVA_HOME="C:\Program Files\Android\Android Studio\jbr"
 $env:ANDROID_HOME="C:\Users\angel\AppData\Local\Android\Sdk"
 
-Write-Host "Compilando aplicación..." -ForegroundColor Cyan
-.\gradlew.bat assembleDebug
+# Contraseñas para firmar la APK con my-upload-key.jks
+$env:STORE_PASSWORD="labelscan_secret_pass"
+$env:KEY_PASSWORD="labelscan_secret_pass"
+
+Write-Host "Compilando aplicación en modo RELEASE..." -ForegroundColor Cyan
+.\gradlew.bat clean assembleRelease
 
 if ($LASTEXITCODE -eq 0) {
-    Write-Host "Copiando APK compilada a la raíz..." -ForegroundColor Green
-    Copy-Item app/build/outputs/apk/debug/app-debug.apk smart-label-ocr-debug.apk -Force
-    Write-Host "¡Listo! smart-label-ocr-debug.apk ha sido actualizada." -ForegroundColor Green
+    Write-Host "Copiando APK compilada (Release) a la raíz..." -ForegroundColor Green
+    Copy-Item app/build/outputs/apk/release/app-release.apk smart-label-ocr-release.apk -Force
+    Write-Host "¡Listo! smart-label-ocr-release.apk ha sido actualizada." -ForegroundColor Green
 } else {
     Write-Error "Error durante la compilación Gradle."
 }
