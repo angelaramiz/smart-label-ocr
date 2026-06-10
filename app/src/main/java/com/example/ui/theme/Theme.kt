@@ -11,50 +11,70 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 
-private val DarkColorScheme =
-  darkColorScheme(
-    primary = HighDensityIndigo,
-    secondary = HighDensityDarkIndigo,
-    background = Color(0xFF0F172A),
-    surface = Color(0xFF1E293B),
-    onPrimary = Color.White,
-    onBackground = Color(0xFFF1F5F9),
-    onSurface = Color(0xFFF1F5F9),
-    outlineVariant = Color(0xFF334155)
-  )
+private val LightColorScheme = lightColorScheme(
+    primary = PrimaryTeal,
+    onPrimary = TextOnPrimary,
+    primaryContainer = PrimaryTealContainer,
+    onPrimaryContainer = PrimaryTealDark,
+    secondary = PrimaryTealMid,
+    onSecondary = TextOnPrimary,
+    secondaryContainer = PrimaryTealLight,
+    onSecondaryContainer = PrimaryTealDark,
+    background = SurfaceWarm,
+    onBackground = TextPrimary,
+    surface = SurfaceCard,
+    onSurface = TextPrimary,
+    surfaceVariant = SurfaceOverlay,
+    onSurfaceVariant = TextSecondary,
+    outline = BorderMuted,
+    outlineVariant = BorderSoft,
+    error = ErrorRose,
+    onError = Color.White,
+    errorContainer = ErrorContainer,
+    onErrorContainer = ErrorRose,
+)
 
-private val LightColorScheme =
-  lightColorScheme(
-    primary = HighDensityIndigo,
-    secondary = HighDensityDarkIndigo,
-    background = SlateBackground,
-    surface = Color.White,
-    primaryContainer = HighDensityPrimaryContainer,
-    onPrimary = Color.White,
-    onSecondary = Color.White,
-    onBackground = SlateTextPrimary,
-    onSurface = SlateTextPrimary,
-    onSurfaceVariant = SlateTextSecondary,
-    outlineVariant = SlateBorder,
-  )
+private val DarkColorScheme = darkColorScheme(
+    primary = PrimaryTealMid,
+    onPrimary = DarkBackground,
+    primaryContainer = PrimaryTealDark,
+    onPrimaryContainer = PrimaryTealLight,
+    secondary = PrimaryTeal,
+    onSecondary = DarkBackground,
+    secondaryContainer = DarkSurfaceVariant,
+    onSecondaryContainer = DarkTextPrimary,
+    background = DarkBackground,
+    onBackground = DarkTextPrimary,
+    surface = DarkSurface,
+    onSurface = DarkTextPrimary,
+    surfaceVariant = DarkSurfaceVariant,
+    onSurfaceVariant = DarkTextSecondary,
+    outline = DarkBorder,
+    outlineVariant = DarkSurfaceVariant,
+    error = ErrorRose,
+    onError = Color.White,
+    errorContainer = Color(0xFF4A1122),
+    onErrorContainer = Color(0xFFFFB3C1),
+)
 
 @Composable
 fun MyApplicationTheme(
-  darkTheme: Boolean = isSystemInDarkTheme(),
-  // Disable dynamic color to enforce our precise, gorgeous high-density palette!
-  dynamicColor: Boolean = false,
-  content: @Composable () -> Unit,
+    darkTheme: Boolean = isSystemInDarkTheme(),
+    dynamicColor: Boolean = false,
+    content: @Composable () -> Unit,
 ) {
-  val colorScheme =
-    when {
-      dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-        val context = LocalContext.current
-        if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-      }
-
-      darkTheme -> DarkColorScheme
-      else -> LightColorScheme
+    val colorScheme = when {
+        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+            val context = LocalContext.current
+            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+        }
+        darkTheme -> DarkColorScheme
+        else -> LightColorScheme
     }
 
-  MaterialTheme(colorScheme = colorScheme, typography = Typography, content = content)
+    MaterialTheme(
+        colorScheme = colorScheme,
+        typography = Typography,
+        content = content
+    )
 }

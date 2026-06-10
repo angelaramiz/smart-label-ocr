@@ -325,6 +325,13 @@ class MainViewModel(private val repository: ProductRepository) : ViewModel() {
         }
     }
 
+    fun injectMockBatchProducts(mockItems: List<BatchItem>) {
+        val currentList = _batchQueue.value.toMutableList()
+        currentList.addAll(mockItems)
+        _batchQueue.value = currentList
+        _showBatchResults.value = true
+    }
+
     // Run OCR analysis on label
     fun analyzeLabel(bitmap: Bitmap) {
         viewModelScope.launch {

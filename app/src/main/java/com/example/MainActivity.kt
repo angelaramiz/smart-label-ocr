@@ -19,11 +19,24 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -47,6 +60,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Delete
@@ -332,350 +346,380 @@ fun MainScreen(viewModel: MainViewModel, modifier: Modifier = Modifier) {
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // Active layout viewport switcher
-        if (currentTab == "escáner") {
-            // VIEWPORT 1: ESCÁNER INTELIGENTE (Smart Label OCR Scanner)
-            LazyColumn(
-                modifier = Modifier.fillMaxWidth().weight(1f),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                // Dynamic Mode Switcher Card at the top of the tab
-                item {
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 2.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
-                        shape = RoundedCornerShape(14.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-                    ) {
-                        Row(
+        // Active layout viewport switcher with slide tab transitions
+        AnimatedContent(
+            targetState = currentTab,
+            modifier = Modifier.fillMaxWidth().weight(1f),
+            transitionSpec = {
+                if (targetState == "inventario") {
+                    (slideInHorizontally { width -> width } + fadeIn()).togetherWith(
+                        slideOutHorizontally { width -> -width } + fadeOut()
+                    )
+                } else {
+                    (slideInHorizontally { width -> -width } + fadeIn()).togetherWith(
+                        slideOutHorizontally { width -> width } + fadeOut()
+                    )
+                }
+            },
+            label = "tabTransition"
+        ) { targetTab ->
+            if (targetTab == "escáner") {
+                // VIEWPORT 1: ESCÁNER INTELIGENTE (Smart Label OCR Scanner)
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // Dynamic Mode Switcher Card at the top of the tab
+                    item {
+                        Card(
                             modifier = Modifier
-                                .padding(12.dp)
-                                .fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                                .fillMaxWidth()
+                                .padding(bottom = 2.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+                            shape = RoundedCornerShape(14.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
                         ) {
                             Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.weight(1f)
+                                modifier = Modifier
+                                    .padding(12.dp)
+                                    .fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
-                                    contentAlignment = Alignment.Center
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.weight(1f)
                                 ) {
-                                    Icon(
-                                        imageVector = if (isBatchMode) Icons.Default.List else Icons.Default.Home,
-                                        contentDescription = "Operating Mode",
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Column {
-                                    Text(
-                                        text = if (isBatchMode) "Modo Lote (Cola Activa)" else "Modo Escaneo Individual",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 13.sp,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                    Text(
-                                        text = if (isBatchMode) "Buffer de fotos con límites RPM y revisión" else "Procesa una etiqueta a la vez",
-                                        fontSize = 11.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
-                            Switch(
-                                checked = isBatchMode,
-                                onCheckedChange = { viewModel.setBatchMode(it) }
-                            )
-                        }
-                    }
-                }
-
-                if (!isBatchMode) {
-                    // --- SINGLE SCAN MODE LAYOUT ---
-                    item {
-                        ScannerOperationsPanel(
-                            selectedImageUri = selectedImageUri,
-                            selectedBitmap = selectedBitmap,
-                            scanState = scanState,
-                            onLaunchGallery = { galleryLauncher.launch("image/*") },
-                            onLaunchCamera = {
-                                val tempFile = File(context.cacheDir, "camera_label_${System.currentTimeMillis()}.jpg")
-                                val uri = FileProvider.getUriForFile(
-                                    context,
-                                    "${context.packageName}.fileprovider",
-                                    tempFile
-                                )
-                                cameraImageUri = uri
-                                cameraLauncher.launch(uri)
-                            },
-                            onSimulateReferenceLabel = {
-                                // High Craftsmanship UI simulator of the exact footwear labels specified in the prompt
-                                viewModel.setScanStateIdle()
-                                // Create a simulated 1x1 test scan representing the user's box label request
-                                val simulatedUpc = "198969847733"
-                                val simulatedModel = "GWFASHIE"
-                                val simulatedSize = "6 M"
-                                val simulatedColor = "DARK RED 600"
-                                
-                                viewModel.commitProduct(simulatedUpc, simulatedModel, simulatedSize, simulatedColor, 1)
-                            }
-                        )
-                    }
-
-                    item {
-                        // Gemini Analysis Loading Indicators
-                        AnimatedVisibility(
-                            visible = scanState is ScanState.Processing,
-                            enter = fadeIn() + expandVertically(),
-                            exit = fadeOut() + shrinkVertically()
-                        ) {
-                            Card(
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f))
-                            ) {
-                                Column(
-                                    modifier = Modifier.padding(20.dp).fillMaxWidth(),
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.Center
-                                ) {
-                                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
-                                    Spacer(modifier = Modifier.height(14.dp))
-                                    Text(
-                                        text = "Gemini 2.5 Flash analizando etiqueta...",
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text(
-                                        text = "Verificando UPC, Modelo y Tallas mediante OCR multi-modal.",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        textAlign = TextAlign.Center
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    // If Error occurred, show detailed error prompt
-                    if (scanState is ScanState.Error) {
-                        item {
-                            Card(
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f)),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.error)
-                            ) {
-                                Column(modifier = Modifier.padding(16.dp)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(
-                                            imageVector = Icons.Default.Info,
-                                            contentDescription = "Error",
-                                            tint = MaterialTheme.colorScheme.error
-                                        )
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text(
-                                            text = "Error de Procesamiento OCR",
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.error
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    Text(
-                                        text = (scanState as ScanState.Error).message,
-                                        style = MaterialTheme.typography.bodyMedium
-                                    )
-                                    Spacer(modifier = Modifier.height(12.dp))
-                                    Button(
-                                        onClick = { viewModel.setScanStateIdle() },
-                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                                    Box(
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
+                                        contentAlignment = Alignment.Center
                                     ) {
-                                        Text("Reintentar")
+                                        Icon(
+                                            imageVector = if (isBatchMode) Icons.AutoMirrored.Filled.List else Icons.Default.Home,
+                                            contentDescription = "Operating Mode",
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column {
+                                        Text(
+                                            text = if (isBatchMode) "Modo Lote (Cola Activa)" else "Modo Escaneo Individual",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 13.sp,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Text(
+                                            text = if (isBatchMode) "Buffer de fotos con límites RPM and revisión" else "Procesa una etiqueta a la vez",
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                                Switch(
+                                    checked = isBatchMode,
+                                    onCheckedChange = { viewModel.setBatchMode(it) }
+                                )
+                            }
+                        }
+                    }
+
+                    if (!isBatchMode) {
+                        // --- SINGLE SCAN MODE LAYOUT ---
+                        item {
+                            ScannerOperationsPanel(
+                                selectedImageUri = selectedImageUri,
+                                selectedBitmap = selectedBitmap,
+                                scanState = scanState,
+                                onLaunchGallery = { galleryLauncher.launch("image/*") },
+                                onLaunchCamera = {
+                                    val tempFile = File(context.cacheDir, "camera_label_${System.currentTimeMillis()}.jpg")
+                                    val uri = FileProvider.getUriForFile(
+                                        context,
+                                        "${context.packageName}.fileprovider",
+                                        tempFile
+                                    )
+                                    cameraImageUri = uri
+                                    cameraLauncher.launch(uri)
+                                },
+                                onSimulateReferenceLabel = {
+                                    // High Craftsmanship UI simulator of the exact footwear labels specified in the prompt
+                                    viewModel.setScanStateIdle()
+                                    // Create a simulated 1x1 test scan representing the user's box label request
+                                    val simulatedUpc = "198969847733"
+                                    val simulatedModel = "GWFASHIE"
+                                    val simulatedSize = "6 M"
+                                    val simulatedColor = "DARK RED 600"
+                                    
+                                    viewModel.commitProduct(simulatedUpc, simulatedModel, simulatedSize, simulatedColor, 1)
+                                }
+                            )
+                        }
+
+                        item {
+                            // Gemini Analysis Loading Indicators
+                            AnimatedVisibility(
+                                visible = scanState is ScanState.Processing,
+                                enter = fadeIn() + expandVertically(),
+                                exit = fadeOut() + shrinkVertically()
+                            ) {
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f))
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(20.dp).fillMaxWidth(),
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.Center
+                                    ) {
+                                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                                        Spacer(modifier = Modifier.height(14.dp))
+                                        Text(
+                                            text = "Gemini 2.5 Flash analizando etiqueta...",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = "Verificando UPC, Modelo y Tallas mediante OCR multi-modal.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            textAlign = TextAlign.Center
+                                        )
                                     }
                                 }
                             }
                         }
-                    }
 
-                    // Extracted values verification review sheet
-                    if (verificationProduct != null && scanState is ScanState.Success) {
+                        // If Error occurred, show detailed error prompt
+                        if (scanState is ScanState.Error) {
+                            item {
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f)),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.error)
+                                ) {
+                                    Column(modifier = Modifier.padding(16.dp)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(
+                                                imageVector = Icons.Default.Info,
+                                                contentDescription = "Error",
+                                                tint = MaterialTheme.colorScheme.error
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text(
+                                                text = "Error de Procesamiento OCR",
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.error
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Text(
+                                            text = (scanState as ScanState.Error).message,
+                                            style = MaterialTheme.typography.bodyMedium
+                                        )
+                                        Spacer(modifier = Modifier.height(12.dp))
+                                        Button(
+                                            onClick = { viewModel.setScanStateIdle() },
+                                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                                        ) {
+                                            Text("Reintentar")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Extracted values verification review sheet
+                        if (verificationProduct != null && scanState is ScanState.Success) {
+                            item {
+                                VerificationProductForm(
+                                    product = verificationProduct!!,
+                                    onSave = { updatedModel, updatedUpc, updatedSize, updatedColor, qty ->
+                                        viewModel.commitProduct(
+                                            upc = updatedUpc,
+                                            model = updatedModel,
+                                            size = updatedSize,
+                                            color = updatedColor,
+                                            quantity = qty
+                                        )
+                                        // Clear image selection
+                                        selectedImageUri = null
+                                        selectedBitmap = null
+                                    },
+                                    onCancel = {
+                                        viewModel.setScanStateIdle()
+                                        selectedImageUri = null
+                                        selectedBitmap = null
+                                    }
+                                )
+                            }
+                        }
+                    } else {
+                        // --- BATCH MODE LAYOUT ---
                         item {
-                            VerificationProductForm(
-                                product = verificationProduct!!,
-                                onSave = { updatedModel, updatedUpc, updatedSize, updatedColor, qty ->
-                                    viewModel.commitProduct(
-                                        upc = updatedUpc,
-                                        model = updatedModel,
-                                        size = updatedSize,
-                                        color = updatedColor,
-                                        quantity = qty
+                            ScannerOperationsPanel(
+                                selectedImageUri = null,
+                                selectedBitmap = if (batchQueue.isNotEmpty()) batchQueue.last().bitmap else null,
+                                scanState = ScanState.Idle,
+                                onLaunchGallery = { multipleGalleryLauncher.launch("image/*") },
+                                onLaunchCamera = {
+                                    val tempFile = File(context.cacheDir, "camera_batch_${System.currentTimeMillis()}.jpg")
+                                    val uri = FileProvider.getUriForFile(
+                                        context,
+                                        "${context.packageName}.fileprovider",
+                                        tempFile
                                     )
-                                    // Clear image selection
-                                    selectedImageUri = null
-                                    selectedBitmap = null
+                                    cameraImageUri = uri
+                                    cameraLauncher.launch(uri)
                                 },
-                                onCancel = {
-                                    viewModel.setScanStateIdle()
-                                    selectedImageUri = null
-                                    selectedBitmap = null
+                                onSimulateReferenceLabel = {
+                                    injectMockBatchProducts(viewModel, context)
                                 }
                             )
                         }
-                    }
-                } else {
-                    // --- BATCH MODE LAYOUT ---
-                    item {
-                        ScannerOperationsPanel(
-                            selectedImageUri = null,
-                            selectedBitmap = if (batchQueue.isNotEmpty()) batchQueue.last().bitmap else null,
-                            scanState = ScanState.Idle,
-                            onLaunchGallery = { multipleGalleryLauncher.launch("image/*") },
-                            onLaunchCamera = {
-                                val tempFile = File(context.cacheDir, "camera_batch_${System.currentTimeMillis()}.jpg")
-                                val uri = FileProvider.getUriForFile(
-                                    context,
-                                    "${context.packageName}.fileprovider",
-                                    tempFile
-                                )
-                                cameraImageUri = uri
-                                cameraLauncher.launch(uri)
-                            },
-                            onSimulateReferenceLabel = {
-                                injectMockBatchProducts(viewModel, context)
-                            }
-                        )
-                    }
 
-                    item {
-                        BatchOperationsPanel(
-                            viewModel = viewModel,
-                            batchQueue = batchQueue,
-                            isBatchProcessing = isBatchProcessing,
-                            batchRpmLimit = batchRpmLimit,
-                            batchProgressText = batchProgressText,
-                            onLaunchGallery = { multipleGalleryLauncher.launch("image/*") },
-                            onLaunchCamera = {
-                                val tempFile = File(context.cacheDir, "camera_batch_${System.currentTimeMillis()}.jpg")
-                                val uri = FileProvider.getUriForFile(
-                                    context,
-                                    "${context.packageName}.fileprovider",
-                                    tempFile
-                                )
-                                cameraImageUri = uri
-                                cameraLauncher.launch(uri)
-                            }
-                        )
-                    }
-                }
-            }
-        } else {
-            // VIEWPORT 2: TABLA INVENTARIO (Excel-styled spreadsheets grouped by model)
-            // Filter Bar
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("Buscar por Modelo o UPC...") },
-                leadingIcon = { Icon(imageVector = Icons.Default.Search, contentDescription = "Buscar") },
-                trailingIcon = {
-                    if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { searchQuery = "" }) {
-                            Icon(imageVector = Icons.Default.Clear, contentDescription = "Limpiar")
+                        item {
+                            BatchOperationsPanel(
+                                viewModel = viewModel,
+                                batchQueue = batchQueue,
+                                isBatchProcessing = isBatchProcessing,
+                                batchRpmLimit = batchRpmLimit,
+                                batchProgressText = batchProgressText,
+                                onLaunchGallery = { multipleGalleryLauncher.launch("image/*") },
+                                onLaunchCamera = {
+                                    val tempFile = File(context.cacheDir, "camera_batch_${System.currentTimeMillis()}.jpg")
+                                    val uri = FileProvider.getUriForFile(
+                                        context,
+                                        "${context.packageName}.fileprovider",
+                                        tempFile
+                                    )
+                                    cameraImageUri = uri
+                                    cameraLauncher.launch(uri)
+                                }
+                            )
                         }
-                    }
-                },
-                singleLine = true,
-                shape = RoundedCornerShape(12.dp)
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Action row (Export / Manual Add)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedButton(
-                    onClick = {
-                        val csv = viewModel.getInventoryCsvString()
-                        if (csv.isEmpty()) {
-                            Toast.makeText(context, "No hay productos que exportar", Toast.LENGTH_SHORT).show()
-                        } else {
-                            shareCsvAndSave(context, csv)
-                        }
-                    },
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    Icon(imageVector = Icons.Default.Share, contentDescription = "Exportar")
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Exportar Excel (CSV)")
-                }
-
-                Button(
-                    onClick = { showManualAddDialog = true },
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    Icon(imageVector = Icons.Default.Add, contentDescription = "Manual")
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Agregar Manual")
-                }
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // Excel Spreadsheet groups matching requested criteria
-            val filteredInventory = inventoryList.filter {
-                it.model.contains(searchQuery, ignoreCase = true) || 
-                it.upc.contains(searchQuery, ignoreCase = true) ||
-                it.size.contains(searchQuery, ignoreCase = true)
-            }
-
-            val groupedByModel = filteredInventory.groupBy { it.model.uppercase().trim() }
-
-            if (groupedByModel.isEmpty()) {
-                Box(
-                    modifier = Modifier.fillMaxWidth().weight(1f),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = if (searchQuery.isNotEmpty()) "Sin coincidencias" else "Inventario vacío",
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = if (searchQuery.isNotEmpty()) "Intente con otros términos de búsqueda." else "Escanee una etiqueta de calzado o prenda para registrar su stock.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center
-                        )
                     }
                 }
             } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxWidth().weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                // VIEWPORT 2: TABLA INVENTARIO (Excel-styled spreadsheets grouped by model)
+                Column(
+                    modifier = Modifier.fillMaxSize()
                 ) {
-                    groupedByModel.forEach { (modelName, products) ->
-                        item {
-                            ProductModelSpreadsheetCard(
-                                modelName = modelName,
-                                productsList = products,
-                                onIncrement = { prod -> viewModel.updateQuantity(prod, prod.quantity + 1) },
-                                onDecrement = { prod -> viewModel.updateQuantity(prod, prod.quantity - 1) },
-                                onDelete = { id -> viewModel.deleteProduct(id) }
-                            )
+                    // Filter Bar
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Buscar por Modelo o UPC...") },
+                        leadingIcon = { Icon(imageVector = Icons.Default.Search, contentDescription = "Buscar") },
+                        trailingIcon = {
+                            if (searchQuery.isNotEmpty()) {
+                                IconButton(onClick = { searchQuery = "" }) {
+                                    Icon(imageVector = Icons.Default.Clear, contentDescription = "Limpiar")
+                                }
+                            }
+                        },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MaterialTheme.colorScheme.primary,
+                            focusedLabelColor = MaterialTheme.colorScheme.primary,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                            unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Action row (Export / Manual Add)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                val csv = viewModel.getInventoryCsvString()
+                                if (csv.isEmpty()) {
+                                    Toast.makeText(context, "No hay productos que exportar", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    shareCsvAndSave(context, csv)
+                                }
+                            },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))
+                        ) {
+                            Icon(imageVector = Icons.Default.Share, contentDescription = "Exportar")
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Exportar Excel (CSV)")
+                        }
+
+                        Button(
+                            onClick = { showManualAddDialog = true },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                        ) {
+                            Icon(imageVector = Icons.Default.Add, contentDescription = "Manual")
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Agregar Manual")
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Excel Spreadsheet groups matching requested criteria
+                    val filteredInventory = inventoryList.filter {
+                        it.model.contains(searchQuery, ignoreCase = true) || 
+                        it.upc.contains(searchQuery, ignoreCase = true) ||
+                        it.size.contains(searchQuery, ignoreCase = true)
+                    }
+
+                    val groupedByModel = filteredInventory.groupBy { it.model.uppercase().trim() }
+
+                    if (groupedByModel.isEmpty()) {
+                        Box(
+                            modifier = Modifier.fillMaxWidth().weight(1f),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(
+                                    text = if (searchQuery.isNotEmpty()) "Sin coincidencias" else "Inventario vacío",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = if (searchQuery.isNotEmpty()) "Intente con otros términos de búsqueda." else "Escanee una etiqueta de calzado o prenda para registrar su stock.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier.fillMaxWidth().weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            groupedByModel.forEach { (modelName, products) ->
+                                item {
+                                    ProductModelSpreadsheetCard(
+                                        modelName = modelName,
+                                        productsList = products,
+                                        onIncrement = { prod -> viewModel.updateQuantity(prod, prod.quantity + 1) },
+                                        onDecrement = { prod -> viewModel.updateQuantity(prod, prod.quantity - 1) },
+                                        onDelete = { id -> viewModel.deleteProduct(id) }
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -736,7 +780,7 @@ fun HeaderBar(onClearAll: () -> Unit, onCheckForUpdates: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color(0xFFF7F9FC))
+            .background(Color.Transparent)
             .padding(vertical = 12.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
@@ -745,18 +789,18 @@ fun HeaderBar(onClearAll: () -> Unit, onCheckForUpdates: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Elegant scanner visual logo icon
+            // Elegant scanner visual logo icon in primary teal
             Box(
                 modifier = Modifier
                     .size(40.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(Color(0xFF4F46E5)),
+                    .background(MaterialTheme.colorScheme.primary),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = Icons.Default.List,
+                    imageVector = Icons.AutoMirrored.Filled.List,
                     contentDescription = "Scanner Logo",
-                    tint = Color.White,
+                    tint = MaterialTheme.colorScheme.onPrimary,
                     modifier = Modifier.size(24.dp)
                 )
             }
@@ -768,33 +812,33 @@ fun HeaderBar(onClearAll: () -> Unit, onCheckForUpdates: () -> Unit) {
                 ) {
                     Text(
                         text = "LabelScan AI",
-                        fontSize = 18.sp,
+                        style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF0F172A),
+                        color = MaterialTheme.colorScheme.onBackground,
                         lineHeight = 20.sp
                     )
                     Box(
                         modifier = Modifier
                             .background(
-                                color = Color(0xFFE2E8F0),
-                                shape = RoundedCornerShape(4.dp)
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                shape = RoundedCornerShape(6.dp)
                             )
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
                         Text(
                             text = "v${com.example.BuildConfig.VERSION_NAME}",
-                            fontSize = 10.sp,
+                            style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF475569)
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
                 val activeProvider = com.example.data.network.GeminiService.getActiveProviderName()
                 Text(
                     text = "OCR: $activeProvider",
-                    fontSize = 10.sp,
+                    style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.SemiBold,
-                    color = Color(0xFF4F46E5),
+                    color = MaterialTheme.colorScheme.primary,
                     letterSpacing = 0.5.sp
                 )
             }
@@ -808,7 +852,7 @@ fun HeaderBar(onClearAll: () -> Unit, onCheckForUpdates: () -> Unit) {
                 Icon(
                     imageVector = Icons.Default.MoreVert,
                     contentDescription = "Opciones",
-                    tint = Color(0xFF64748B),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(22.dp)
                 )
             }
@@ -879,15 +923,27 @@ fun SegmentedTabBar(currentTab: String, onTabSelected: (String) -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
-            .background(Color(0xFFE2E8F0))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
             .padding(4.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
+        val scannerActive = currentTab == "escáner"
+        val inventoryActive = currentTab == "inventario"
+
+        val scannerBg by androidx.compose.animation.animateColorAsState(
+            targetValue = if (scannerActive) MaterialTheme.colorScheme.primary else Color.Transparent,
+            label = "scannerBg"
+        )
+        val scannerContent by androidx.compose.animation.animateColorAsState(
+            targetValue = if (scannerActive) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+            label = "scannerContent"
+        )
+
         Row(
             modifier = Modifier
                 .weight(1f)
                 .clip(RoundedCornerShape(10.dp))
-                .background(if (currentTab == "escáner") Color(0xFF4F46E5) else Color.Transparent)
+                .background(scannerBg)
                 .clickable { onTabSelected("escáner") }
                 .padding(vertical = 12.dp),
             horizontalArrangement = Arrangement.Center,
@@ -896,38 +952,47 @@ fun SegmentedTabBar(currentTab: String, onTabSelected: (String) -> Unit) {
             Icon(
                 imageVector = Icons.Default.Home,
                 contentDescription = "Escanear",
-                tint = if (currentTab == "escáner") Color.White else Color(0xFF64748B)
+                tint = scannerContent
             )
             Spacer(modifier = Modifier.width(8.dp))
             Text(
                 text = "Escanear Etiquetas",
+                style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold,
-                fontSize = 14.sp,
-                color = if (currentTab == "escáner") Color.White else Color(0xFF475569)
+                color = scannerContent
             )
         }
+
+        val inventoryBg by androidx.compose.animation.animateColorAsState(
+            targetValue = if (inventoryActive) MaterialTheme.colorScheme.primary else Color.Transparent,
+            label = "inventoryBg"
+        )
+        val inventoryContent by androidx.compose.animation.animateColorAsState(
+            targetValue = if (inventoryActive) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+            label = "inventoryContent"
+        )
 
         Row(
             modifier = Modifier
                 .weight(1f)
                 .clip(RoundedCornerShape(10.dp))
-                .background(if (currentTab == "inventario") Color(0xFF4F46E5) else Color.Transparent)
+                .background(inventoryBg)
                 .clickable { onTabSelected("inventario") }
                 .padding(vertical = 12.dp),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
-                imageVector = Icons.Default.List,
+                imageVector = Icons.AutoMirrored.Filled.List,
                 contentDescription = "Inventario",
-                tint = if (currentTab == "inventario") Color.White else Color(0xFF64748B)
+                tint = inventoryContent
             )
             Spacer(modifier = Modifier.width(8.dp))
             Text(
                 text = "Tabla Excel (BD)",
+                style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold,
-                fontSize = 14.sp,
-                color = if (currentTab == "inventario") Color.White else Color(0xFF475569)
+                color = inventoryContent
             )
         }
     }
@@ -942,9 +1007,9 @@ fun MetricsDashboardBanner(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
-            .background(Color.White)
-            .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(16.dp))
-            .padding(vertical = 12.dp, horizontal = 16.dp),
+            .background(MaterialTheme.colorScheme.surface)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp))
+            .padding(vertical = 14.dp, horizontal = 16.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -954,23 +1019,23 @@ fun MetricsDashboardBanner(
         ) {
             Text(
                 text = "Tallas/Variantes",
-                fontSize = 11.sp,
+                style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Medium,
-                color = Color(0xFF64748B)
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Spacer(modifier = Modifier.height(2.dp))
+            Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = totalProductsCount.toString(),
+                style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold,
-                fontSize = 20.sp,
-                color = Color(0xFF0F172A)
+                color = MaterialTheme.colorScheme.onSurface
             )
         }
         Box(
             modifier = Modifier
                 .width(1.dp)
-                .height(30.dp)
-                .background(Color(0xFFE2E8F0))
+                .height(32.dp)
+                .background(MaterialTheme.colorScheme.outlineVariant)
         )
         Column(
             modifier = Modifier.weight(1f),
@@ -978,23 +1043,23 @@ fun MetricsDashboardBanner(
         ) {
             Text(
                 text = "Modelos Únicos",
-                fontSize = 11.sp,
+                style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Medium,
-                color = Color(0xFF64748B)
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Spacer(modifier = Modifier.height(2.dp))
+            Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = uniqueModelsCount.toString(),
+                style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold,
-                fontSize = 20.sp,
-                color = Color(0xFF0F172A)
+                color = MaterialTheme.colorScheme.onSurface
             )
         }
         Box(
             modifier = Modifier
                 .width(1.dp)
-                .height(30.dp)
-                .background(Color(0xFFE2E8F0))
+                .height(32.dp)
+                .background(MaterialTheme.colorScheme.outlineVariant)
         )
         Column(
             modifier = Modifier.weight(1f),
@@ -1002,16 +1067,16 @@ fun MetricsDashboardBanner(
         ) {
             Text(
                 text = "Stock Total",
-                fontSize = 11.sp,
+                style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Medium,
-                color = Color(0xFF64748B)
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Spacer(modifier = Modifier.height(2.dp))
+            Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = totalQuantitySum.toString(),
+                style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.ExtraBold,
-                fontSize = 21.sp,
-                color = Color(0xFF4F46E5)
+                color = MaterialTheme.colorScheme.primary
             )
         }
     }
@@ -1026,18 +1091,68 @@ fun ScannerOperationsPanel(
     onLaunchCamera: () -> Unit,
     onSimulateReferenceLabel: () -> Unit
 ) {
+    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+    val pulseAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.4f,
+        targetValue = 1.0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulseAlpha"
+    )
+    val scanlineOffsetY by infiniteTransition.animateFloat(
+        initialValue = 0.05f,
+        targetValue = 0.95f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "scanlineOffsetY"
+    )
+
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // High Density Viewfinder card
+        // High Density Viewfinder card with animated borders
+        val accentColor = MaterialTheme.colorScheme.primary
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(160.dp)
                 .clip(RoundedCornerShape(20.dp))
-                .background(Color(0xFF0F172A))
-                .border(1.5.dp, Color(0xFF4F46E5).copy(alpha = 0.3f), RoundedCornerShape(20.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                .border(1.5.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(20.dp))
+                .drawBehind {
+                    val strokeWidth = 3.dp.toPx()
+                    val cornerLength = 20.dp.toPx()
+                    val colorWithAlpha = accentColor.copy(alpha = pulseAlpha)
+
+                    // Top Left Corner
+                    drawLine(colorWithAlpha, Offset(0f, 0f), Offset(cornerLength, 0f), strokeWidth)
+                    drawLine(colorWithAlpha, Offset(0f, 0f), Offset(0f, cornerLength), strokeWidth)
+
+                    // Top Right Corner
+                    drawLine(colorWithAlpha, Offset(size.width, 0f), Offset(size.width - cornerLength, 0f), strokeWidth)
+                    drawLine(colorWithAlpha, Offset(size.width, 0f), Offset(size.width, cornerLength), strokeWidth)
+
+                    // Bottom Left Corner
+                    drawLine(colorWithAlpha, Offset(0f, size.height), Offset(cornerLength, size.height), strokeWidth)
+                    drawLine(colorWithAlpha, Offset(0f, size.height), Offset(0f, size.height - cornerLength), strokeWidth)
+
+                    // Bottom Right Corner
+                    drawLine(colorWithAlpha, Offset(size.width, size.height), Offset(size.width - cornerLength, size.height), strokeWidth)
+                    drawLine(colorWithAlpha, Offset(size.width, size.height), Offset(size.width, size.height - cornerLength), strokeWidth)
+
+                    // Draw animated laser scanline
+                    drawLine(
+                        color = accentColor.copy(alpha = 0.8f),
+                        start = Offset(0f, scanlineOffsetY * size.height),
+                        end = Offset(size.width, scanlineOffsetY * size.height),
+                        strokeWidth = 2.dp.toPx()
+                    )
+                }
         ) {
             if (selectedBitmap != null) {
                 // If a photo was selected, show it inside our majestic viewfinder!
@@ -1051,7 +1166,7 @@ fun ScannerOperationsPanel(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Color(0xFF4F46E5).copy(alpha = 0.1f))
+                        .background(accentColor.copy(alpha = 0.05f))
                 )
             } else {
                 // Futuristic tech grid background illustration
@@ -1063,32 +1178,23 @@ fun ScannerOperationsPanel(
                     Icon(
                         imageVector = Icons.Default.Search,
                         contentDescription = "Scan icon",
-                        tint = Color(0xFF818CF8).copy(alpha = 0.6f),
+                        tint = accentColor.copy(alpha = 0.6f),
                         modifier = Modifier.size(36.dp)
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = "Visor de Escaneo AI",
-                        fontSize = 13.sp,
+                        style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFFF1F5F9)
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
                         text = "Coloque la etiqueta dentro del recuadro",
-                        fontSize = 10.sp,
-                        color = Color(0xFF94A3B8)
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
-
-            // Laser scanline animation overlay line
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .align(Alignment.Center)
-                    .height(2.dp)
-                    .background(Color(0xFFF43F5E).copy(alpha = 0.8f)) // Crimson pink/red scanline
-            )
 
             // Dynamic Status Tag at bottom-left
             Box(
@@ -1102,7 +1208,7 @@ fun ScannerOperationsPanel(
             ) {
                 Text(
                     text = if (selectedBitmap != null) "ANALIZANDO: ETIQUETA_CARGADA.JPG" else "VISOR ACTIVO: LISTO PARA CAPTURAR",
-                    fontSize = 9.sp,
+                    style = MaterialTheme.typography.labelSmall,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
                     color = if (selectedBitmap != null) Color(0xFF38BDF8) else Color(0xFF34D399)
@@ -1119,23 +1225,26 @@ fun ScannerOperationsPanel(
                 onClick = onLaunchCamera,
                 modifier = Modifier.weight(1f).height(48.dp),
                 shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4F46E5))
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
             ) {
                 Icon(imageVector = Icons.Default.Edit, contentDescription = "Cámara", modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(6.dp))
-                Text("Cámara", fontWeight = FontWeight.Bold)
+                Text("Cámara", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             }
 
             Button(
                 onClick = onLaunchGallery,
                 modifier = Modifier.weight(1f).height(48.dp),
                 shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEEF2FF), contentColor = Color(0xFF4F46E5)),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFC7D2FE))
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f),
+                    contentColor = MaterialTheme.colorScheme.primary
+                ),
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f))
             ) {
                 Icon(imageVector = Icons.Default.Face, contentDescription = "Galería", modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(6.dp))
-                Text("Galería", fontWeight = FontWeight.Bold)
+                Text("Galería", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             }
         }
 
@@ -1144,8 +1253,8 @@ fun ScannerOperationsPanel(
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable { onSimulateReferenceLabel() },
-            colors = CardDefaults.cardColors(containerColor = Color(0xFFEEF2FF)),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFC7D2FE)),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f)),
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
             shape = RoundedCornerShape(12.dp)
         ) {
             Row(
@@ -1156,13 +1265,13 @@ fun ScannerOperationsPanel(
                     modifier = Modifier
                         .size(32.dp)
                         .clip(RoundedCornerShape(8.dp))
-                        .background(Color(0xFF4F46E5).copy(alpha = 0.1f)),
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.Default.PlayArrow,
                         contentDescription = "Simulacro",
-                        tint = Color(0xFF4F46E5),
+                        tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(16.dp)
                     )
                 }
@@ -1170,14 +1279,14 @@ fun ScannerOperationsPanel(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "Inyección Rápida de Etiqueta (GWFASHIE)",
+                        style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp,
-                        color = Color(0xFF312E81)
+                        color = MaterialTheme.colorScheme.primary
                     )
                     Text(
                         text = "Registrar de inmediato datos preestablecidos de la etiqueta modelo",
-                        fontSize = 11.sp,
-                        color = Color(0xFF4F46E5)
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
@@ -1197,11 +1306,18 @@ fun VerificationProductForm(
     var colorVal by remember { mutableStateOf(product.color) }
     var qtyVal by remember { mutableStateOf(product.quantity) }
 
+    val textFieldColors = OutlinedTextFieldDefaults.colors(
+        focusedBorderColor = MaterialTheme.colorScheme.primary,
+        focusedLabelColor = MaterialTheme.colorScheme.primary,
+        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+        unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
@@ -1223,7 +1339,8 @@ fun VerificationProductForm(
                 onValueChange = { modelVal = it },
                 label = { Text("Modelo (Model)") },
                 modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                shape = RoundedCornerShape(8.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = textFieldColors,
                 singleLine = true
             )
 
@@ -1232,7 +1349,8 @@ fun VerificationProductForm(
                 onValueChange = { upcVal = it },
                 label = { Text("Código de Barras (UPC)") },
                 modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                shape = RoundedCornerShape(8.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = textFieldColors,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 singleLine = true
             )
@@ -1242,7 +1360,8 @@ fun VerificationProductForm(
                 onValueChange = { sizeVal = it },
                 label = { Text("Talla (Size)") },
                 modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
-                shape = RoundedCornerShape(8.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = textFieldColors,
                 singleLine = true
             )
 
@@ -1250,7 +1369,7 @@ fun VerificationProductForm(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(8.dp))
+                    .clip(RoundedCornerShape(12.dp))
                     .background(MaterialTheme.colorScheme.surfaceVariant)
                     .padding(10.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1258,31 +1377,32 @@ fun VerificationProductForm(
             ) {
                 Text(
                     text = "Cantidad a Ingresar",
+                    style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp
+                    color = MaterialTheme.colorScheme.onSurface
                 )
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton(
                         onClick = { if (qtyVal > 1) qtyVal-- },
-                        modifier = Modifier.size(36.dp).background(MaterialTheme.colorScheme.surface, RoundedCornerShape(6.dp))
+                        modifier = Modifier.size(36.dp).background(MaterialTheme.colorScheme.surface, RoundedCornerShape(8.dp))
                     ) {
-                        Text("-", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        Text("-", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     }
 
                     Text(
                         text = qtyVal.toString(),
+                        style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Black,
-                        fontSize = 18.sp,
                         modifier = Modifier.padding(horizontal = 16.dp),
                         color = MaterialTheme.colorScheme.primary
                     )
 
                     IconButton(
                         onClick = { qtyVal++ },
-                        modifier = Modifier.size(36.dp).background(MaterialTheme.colorScheme.surface, RoundedCornerShape(6.dp))
+                        modifier = Modifier.size(36.dp).background(MaterialTheme.colorScheme.surface, RoundedCornerShape(8.dp))
                     ) {
-                        Text("+", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        Text("+", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -1297,7 +1417,8 @@ fun VerificationProductForm(
                 OutlinedButton(
                     onClick = onCancel,
                     modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(10.dp)
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant)
                 ) {
                     Text("Descartar")
                 }
@@ -1311,7 +1432,8 @@ fun VerificationProductForm(
                         }
                     },
                     modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(10.dp)
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                 ) {
                     Text("Confirmar y Guardar")
                 }
@@ -1333,8 +1455,8 @@ fun ProductModelSpreadsheetCard(
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0))
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
     ) {
         Column {
             // Card Header (Model details)
@@ -1342,7 +1464,7 @@ fun ProductModelSpreadsheetCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable { expanded = !expanded }
-                    .background(Color(0xFFEEF2FF)) // Indigo-50
+                    .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f))
                     .padding(horizontal = 14.dp, vertical = 12.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
@@ -1355,27 +1477,27 @@ fun ProductModelSpreadsheetCard(
                         modifier = Modifier
                             .size(28.dp)
                             .clip(RoundedCornerShape(8.dp))
-                            .background(Color(0xFF4F46E5)),
+                            .background(MaterialTheme.colorScheme.primary),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = Icons.Default.List,
+                            imageVector = Icons.AutoMirrored.Filled.List,
                             contentDescription = "Modelo",
-                            tint = Color.White,
+                            tint = MaterialTheme.colorScheme.onPrimary,
                             modifier = Modifier.size(16.dp)
                         )
                     }
                     Column {
                         Text(
                             text = "MODELO: ${modelName.uppercase()}",
+                            style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp,
-                            color = Color(0xFF1E1B4B)
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
                             text = "${productsList.size} variante(s) de talla | Stock: ${productsList.sumOf { it.quantity }}",
-                            fontSize = 11.sp,
-                            color = Color(0xFF64748B)
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
@@ -1383,7 +1505,7 @@ fun ProductModelSpreadsheetCard(
                 Icon(
                     imageVector = if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
                     contentDescription = "Toggle",
-                    tint = Color(0xFF4F46E5)
+                    tint = MaterialTheme.colorScheme.primary
                 )
             }
 
@@ -1412,30 +1534,30 @@ fun ProductModelSpreadsheetCard(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(Color(0xFFF1F5F9)) // Slate-100
-                            .border(0.5.dp, Color(0xFFE2E8F0))
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                            .border(0.5.dp, MaterialTheme.colorScheme.outlineVariant)
                             .padding(vertical = 10.dp, horizontal = 12.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
                             text = "TOTAL MODELO",
+                            style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 10.sp,
-                            color = Color(0xFF475569)
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                             Text(
                                 text = "Variantes: ${productsList.size}",
+                                style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.SemiBold,
-                                fontSize = 10.sp,
-                                color = Color(0xFF64748B)
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
                                 text = "Stock: ${productsList.sumOf { it.quantity }}",
+                                style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 10.sp,
-                                color = Color(0xFF4F46E5)
+                                color = MaterialTheme.colorScheme.primary
                             )
                         }
                     }
@@ -1451,8 +1573,8 @@ fun ExcelSpreadsheetHeader() {
         modifier = Modifier
             .fillMaxWidth()
             .height(30.dp)
-            .background(Color(0xFFF1F5F9)) // nice soft slate-100
-            .border(width = 0.5.dp, color = Color(0xFFE2E8F0)),
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .border(width = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant),
         verticalAlignment = Alignment.CenterVertically
     ) {
         // Index cell
@@ -1460,14 +1582,14 @@ fun ExcelSpreadsheetHeader() {
             modifier = Modifier
                 .weight(0.6f)
                 .height(30.dp)
-                .cellBorder(),
+                .cellBorder(color = MaterialTheme.colorScheme.outlineVariant),
             contentAlignment = Alignment.Center
         ) {
             Text(
                 text = "#",
+                style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Bold,
-                fontSize = 9.sp,
-                color = Color(0xFF64748B)
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
         // UPC header cell
@@ -1475,15 +1597,15 @@ fun ExcelSpreadsheetHeader() {
             modifier = Modifier
                 .weight(2.8f)
                 .height(30.dp)
-                .cellBorder()
+                .cellBorder(color = MaterialTheme.colorScheme.outlineVariant)
                 .padding(horizontal = 6.dp),
             contentAlignment = Alignment.CenterStart
         ) {
             Text(
                 text = "UPC",
+                style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Bold,
-                fontSize = 9.sp,
-                color = Color(0xFF64748B)
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
         // size header cell
@@ -1491,14 +1613,14 @@ fun ExcelSpreadsheetHeader() {
             modifier = Modifier
                 .weight(1.4f)
                 .height(30.dp)
-                .cellBorder(),
+                .cellBorder(color = MaterialTheme.colorScheme.outlineVariant),
             contentAlignment = Alignment.Center
         ) {
             Text(
                 text = "TALLA",
+                style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Bold,
-                fontSize = 9.sp,
-                color = Color(0xFF64748B)
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
         // stock header cell
@@ -1506,14 +1628,14 @@ fun ExcelSpreadsheetHeader() {
             modifier = Modifier
                 .weight(1.4f)
                 .height(30.dp)
-                .cellBorder(),
+                .cellBorder(color = MaterialTheme.colorScheme.outlineVariant),
             contentAlignment = Alignment.Center
         ) {
             Text(
                 text = "CANT",
+                style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Bold,
-                fontSize = 9.sp,
-                color = Color(0xFF64748B)
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
         // action cell
@@ -1525,9 +1647,9 @@ fun ExcelSpreadsheetHeader() {
         ) {
             Text(
                 text = "ACCIONES",
+                style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Bold,
-                fontSize = 9.sp,
-                color = Color(0xFF64748B)
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
@@ -1547,8 +1669,8 @@ fun ExcelSpreadsheetRow(
         modifier = Modifier
             .fillMaxWidth()
             .height(40.dp)
-            .background(if (isZebra) Color(0xFFF8FAFC) else Color.White) // slate-50 zebra stripe
-            .border(width = 0.5.dp, color = Color(0xFFE2E8F0)),
+            .background(if (isZebra) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surface)
+            .border(width = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant),
         verticalAlignment = Alignment.CenterVertically
     ) {
         // Row index
@@ -1556,15 +1678,15 @@ fun ExcelSpreadsheetRow(
             modifier = Modifier
                 .weight(0.6f)
                 .height(40.dp)
-                .background(Color(0xFFF8FAFC))
-                .cellBorder(),
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                .cellBorder(color = MaterialTheme.colorScheme.outlineVariant),
             contentAlignment = Alignment.Center
         ) {
             Text(
                 text = index.toString(),
-                fontSize = 9.sp,
+                style = MaterialTheme.typography.labelSmall,
                 fontFamily = FontFamily.Monospace,
-                color = Color(0xFF94A3B8)
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
 
@@ -1573,7 +1695,7 @@ fun ExcelSpreadsheetRow(
             modifier = Modifier
                 .weight(2.8f)
                 .height(40.dp)
-                .cellBorder()
+                .cellBorder(color = MaterialTheme.colorScheme.outlineVariant)
                 .clickable {
                     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                     val clip = ClipData.newPlainText("UPC-Code", product.upc)
@@ -1585,9 +1707,9 @@ fun ExcelSpreadsheetRow(
         ) {
             Text(
                 text = product.upc,
-                fontSize = 10.sp,
+                style = MaterialTheme.typography.bodySmall,
                 fontFamily = FontFamily.Monospace,
-                color = Color(0xFF0F172A),
+                color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -1598,31 +1720,31 @@ fun ExcelSpreadsheetRow(
             modifier = Modifier
                 .weight(1.4f)
                 .height(40.dp)
-                .cellBorder(),
+                .cellBorder(color = MaterialTheme.colorScheme.outlineVariant),
             contentAlignment = Alignment.Center
         ) {
             Text(
                 text = product.size,
-                fontSize = 11.sp,
+                style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold,
-                color = Color(0xFF0F172A),
+                color = MaterialTheme.colorScheme.onSurface,
                 textAlign = TextAlign.Center
             )
         }
 
         // Cantidad highlighted cell
-        val qtyColor = if (product.quantity > 5) Color(0xFF4F46E5) else Color(0xFFEF4444)
+        val qtyColor = if (product.quantity > 5) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
         Box(
             modifier = Modifier
                 .weight(1.4f)
                 .height(40.dp)
-                .background(Color(0xFFEEF2FF)) // subtle indigo back focus
-                .cellBorder(),
+                .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f))
+                .cellBorder(color = MaterialTheme.colorScheme.outlineVariant),
             contentAlignment = Alignment.Center
         ) {
             Text(
                 text = "x ${String.format("%02d", product.quantity)}",
-                fontSize = 11.sp,
+                style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold,
                 color = qtyColor,
                 textAlign = TextAlign.Center
@@ -1645,8 +1767,8 @@ fun ExcelSpreadsheetRow(
                 Text(
                     text = "-",
                     fontWeight = FontWeight.Black,
-                    fontSize = 14.sp,
-                    color = Color(0xFF64748B)
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
 
@@ -1658,8 +1780,8 @@ fun ExcelSpreadsheetRow(
                 Text(
                     text = "+",
                     fontWeight = FontWeight.Black,
-                    fontSize = 14.sp,
-                    color = Color(0xFF4F46E5)
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary
                 )
             }
 
@@ -1671,7 +1793,7 @@ fun ExcelSpreadsheetRow(
                 Icon(
                     imageVector = Icons.Default.Delete,
                     contentDescription = "Borrar",
-                    tint = Color(0xFFCBD5E1),
+                    tint = MaterialTheme.colorScheme.error.copy(alpha = 0.6f),
                     modifier = Modifier.size(16.dp)
                 )
             }
@@ -1693,9 +1815,23 @@ fun ManualFormDialog(
     var c by remember { mutableStateOf("") }
     var q by remember { mutableStateOf(1) }
 
+    val textFieldColors = OutlinedTextFieldDefaults.colors(
+        focusedBorderColor = MaterialTheme.colorScheme.primary,
+        focusedLabelColor = MaterialTheme.colorScheme.primary,
+        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+        unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Agregar Producto Manual") },
+        title = {
+            Text(
+                text = "Agregar Producto Manual",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+        },
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
                 OutlinedTextField(
@@ -1703,7 +1839,8 @@ fun ManualFormDialog(
                     onValueChange = { m = it },
                     label = { Text("Modelo (Model)") },
                     modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
-                    shape = RoundedCornerShape(8.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = textFieldColors,
                     singleLine = true
                 )
 
@@ -1712,7 +1849,8 @@ fun ManualFormDialog(
                     onValueChange = { u = it },
                     label = { Text("Código de Barras (UPC)") },
                     modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
-                    shape = RoundedCornerShape(8.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = textFieldColors,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true
                 )
@@ -1722,24 +1860,39 @@ fun ManualFormDialog(
                     onValueChange = { s = it },
                     label = { Text("Talla") },
                     modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
-                    shape = RoundedCornerShape(8.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = textFieldColors,
                     singleLine = true
                 )
 
                 // Quantity Row
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text("Cantidad Inicial:")
+                    Text(
+                        text = "Cantidad Inicial:",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         IconButton(onClick = { if (q > 1) q-- }) {
-                            Text("-", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                            Text("-", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                         }
-                        Text(q.toString(), fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        Text(
+                            text = q.toString(),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
                         IconButton(onClick = { q++ }) {
-                            Text("+", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                            Text("+", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -1751,13 +1904,19 @@ fun ManualFormDialog(
                     if (m.isNotEmpty() && u.isNotEmpty() && s.isNotEmpty()) {
                         onConfirm(m, u, s, c, q)
                     }
-                }
+                },
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
             ) {
                 Text("Registrar")
             }
         },
         dismissButton = {
-            OutlinedButton(onClick = onDismiss) {
+            OutlinedButton(
+                onClick = onDismiss,
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant)
+            ) {
                 Text("Cerrar")
             }
         }
@@ -1824,7 +1983,13 @@ fun sendCompletionNotification(context: Context) {
  
     try {
         // 2. Play 300ms vibration alert
-        val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as? android.os.Vibrator
+        val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val vibratorManager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? android.os.VibratorManager
+            vibratorManager?.defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            context.getSystemService(Context.VIBRATOR_SERVICE) as? android.os.Vibrator
+        }
         if (vibrator != null && vibrator.hasVibrator()) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 vibrator.vibrate(android.os.VibrationEffect.createOneShot(300, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
@@ -1875,6 +2040,7 @@ fun injectMockBatchProducts(viewModel: MainViewModel, context: Context) {
             Triple("194498371192", "AIR-MAX-90-RED", "11 M")
         )
 
+        val mockItems = mutableListOf<com.example.ui.BatchItem>()
         for (item in itemsData) {
             val (upc, model, size) = item
             val width = 300
@@ -1893,43 +2059,25 @@ fun injectMockBatchProducts(viewModel: MainViewModel, context: Context) {
             canvas.drawText("Style: $model", 30f, 180f, paint)
             canvas.drawText("Size: $size", 30f, 230f, paint)
             
-            val batchItem = com.example.ui.BatchItem(
-                bitmap = bitmap,
-                imageUri = null,
-                status = com.example.ui.BatchItemStatus.SUCCESS,
-                extractedUpc = upc,
-                extractedModel = model,
-                extractedSize = size
-            )
-            
-            viewModel.addImageToBatch(bitmap, null)
-            // Fast-track details and status for mock objects so they are instantly ready to review
-            viewModel.updateBatchItemDetails(batchItem.id, model, upc, size)
-        }
-        
-        // Fast-path success states to showcase visual layout review sheet
-        val list = viewModel.batchQueue.value.map {
-            it.copy(
-                status = com.example.ui.BatchItemStatus.SUCCESS,
-                extractedUpc = if (it.extractedUpc.isEmpty()) "195237841104" else it.extractedUpc,
-                extractedModel = if (it.extractedModel.isEmpty()) "COURT-VISION-MID-BLACK" else it.extractedModel,
-                extractedSize = if (it.extractedSize.isEmpty()) "10 M" else it.extractedSize
+            mockItems.add(
+                com.example.ui.BatchItem(
+                    bitmap = bitmap,
+                    imageUri = null,
+                    status = com.example.ui.BatchItemStatus.SUCCESS,
+                    extractedUpc = upc,
+                    extractedModel = model,
+                    extractedSize = size
+                )
             )
         }
-        val queueField = viewModel.javaClass.getDeclaredField("_batchQueue").apply { isAccessible = true }
-        (queueField.get(viewModel) as kotlinx.coroutines.flow.MutableStateFlow<List<com.example.ui.BatchItem>>).value = list
-
-        val resultsField = viewModel.javaClass.getDeclaredField("_showBatchResults").apply { isAccessible = true }
-        (resultsField.get(viewModel) as kotlinx.coroutines.flow.MutableStateFlow<Boolean>).value = true
-
+        viewModel.injectMockBatchProducts(mockItems)
         Toast.makeText(context, "Se inyectaron 3 etiquetas simuladas para revisión inmediata", Toast.LENGTH_SHORT).show()
     } catch (e: Exception) {
         e.printStackTrace()
-        // Graceful fallback inserting directly via addImageToBatch
         val width = 300
         val height = 300
-        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        viewModel.addImageToBatch(bitmap, null)
+        val fallbackBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        viewModel.addImageToBatch(fallbackBitmap, null)
         Toast.makeText(context, "Doble click para simular lote", Toast.LENGTH_SHORT).show()
     }
 }
@@ -1945,6 +2093,7 @@ fun BatchOperationsPanel(
     onLaunchCamera: () -> Unit
 ) {
     val context = LocalContext.current
+    val successColor = Color(0xFF059669) // emerald-600
     
     Card(
         modifier = Modifier
@@ -1976,9 +2125,9 @@ fun BatchOperationsPanel(
                 ) {
                     Text(
                         text = "Colas Secuenciales",
-                        fontSize = 9.sp,
+                        style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                        color = MaterialTheme.colorScheme.primary
                     )
                 }
             }
@@ -2002,14 +2151,14 @@ fun BatchOperationsPanel(
             ) {
                 Text(
                     text = "Límite: $batchRpmLimit RPM",
+                    style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 
                 Text(
                     text = "Envío: 1 cada ${60 / batchRpmLimit} segundos",
-                    fontSize = 11.sp,
+                    style = MaterialTheme.typography.labelMedium,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.secondary
@@ -2035,7 +2184,7 @@ fun BatchOperationsPanel(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
-                        imageVector = Icons.Default.List,
+                        imageVector = Icons.AutoMirrored.Filled.List,
                         contentDescription = "Queue",
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(16.dp)
@@ -2053,7 +2202,7 @@ fun BatchOperationsPanel(
                     Text(
                         text = "Limpiar Todo",
                         modifier = Modifier.clickable { viewModel.clearBatch() },
-                        fontSize = 12.sp,
+                        style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.error
                     )
@@ -2078,7 +2227,7 @@ fun BatchOperationsPanel(
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
                             text = "Agrega fotos de etiquetas para procesar",
-                            fontSize = 11.sp,
+                            style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
@@ -2097,9 +2246,9 @@ fun BatchOperationsPanel(
                                 .border(
                                     2.dp,
                                     when (item.status) {
-                                        com.example.ui.BatchItemStatus.PENDING -> Color(0xFF94A3B8)
+                                        com.example.ui.BatchItemStatus.PENDING -> MaterialTheme.colorScheme.outline
                                         com.example.ui.BatchItemStatus.PROCESSING -> MaterialTheme.colorScheme.primary
-                                        com.example.ui.BatchItemStatus.SUCCESS -> Color(0xFF10B981)
+                                        com.example.ui.BatchItemStatus.SUCCESS -> successColor
                                         com.example.ui.BatchItemStatus.ERROR -> MaterialTheme.colorScheme.error
                                     },
                                     RoundedCornerShape(10.dp)
@@ -2137,9 +2286,9 @@ fun BatchOperationsPanel(
                                     .fillMaxWidth()
                                     .background(
                                         when (item.status) {
-                                            com.example.ui.BatchItemStatus.PENDING -> Color(0xFF64748B).copy(alpha = 0.85f)
+                                            com.example.ui.BatchItemStatus.PENDING -> MaterialTheme.colorScheme.outline.copy(alpha = 0.85f)
                                             com.example.ui.BatchItemStatus.PROCESSING -> MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)
-                                            com.example.ui.BatchItemStatus.SUCCESS -> Color(0xFF10B981).copy(alpha = 0.85f)
+                                            com.example.ui.BatchItemStatus.SUCCESS -> successColor.copy(alpha = 0.85f)
                                             com.example.ui.BatchItemStatus.ERROR -> MaterialTheme.colorScheme.error.copy(alpha = 0.85f)
                                         }
                                     )
@@ -2181,12 +2330,12 @@ fun BatchOperationsPanel(
                         if (isBatchProcessing) {
                             CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.5.dp, color = MaterialTheme.colorScheme.primary)
                         } else {
-                            Icon(imageVector = Icons.Default.Info, contentDescription = "Notificación", tint = Color(0xFF10B981), modifier = Modifier.size(18.dp))
+                            Icon(imageVector = Icons.Default.Info, contentDescription = "Notificación", tint = successColor, modifier = Modifier.size(18.dp))
                         }
                         Spacer(modifier = Modifier.width(10.dp))
                         Text(
                             text = batchProgressText,
-                            fontSize = 12.sp,
+                            style = MaterialTheme.typography.bodySmall,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.weight(1f)
@@ -2203,13 +2352,13 @@ fun BatchOperationsPanel(
                     .fillMaxWidth()
                     .height(48.dp),
                 shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981))
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
             ) {
                 if (isBatchProcessing) {
-                    Text("Procesando lote en segundo plano...", fontWeight = FontWeight.Bold, color = Color.White)
+                    Text("Procesando lote en segundo plano...", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimary)
                 } else {
                     val count = batchQueue.count { it.status != com.example.ui.BatchItemStatus.SUCCESS }
-                    Text("Procesar Lote ($count pendientes)", fontWeight = FontWeight.Bold, color = Color.White)
+                    Text("Procesar Lote ($count pendientes)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimary)
                 }
             }
             
@@ -2220,11 +2369,13 @@ fun BatchOperationsPanel(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(44.dp),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))
                 ) {
-                    Icon(imageVector = Icons.Default.List, contentDescription = "Review", modifier = Modifier.size(16.dp))
+                    Icon(imageVector = Icons.AutoMirrored.Filled.List, contentDescription = "Review", modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Revisar Resultados del Lote", fontWeight = FontWeight.Bold)
+                    Text("Revisar Resultados del Lote", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -2237,10 +2388,12 @@ fun BatchResultsReviewDialog(
     batchQueue: List<com.example.ui.BatchItem>,
     onClose: () -> Unit
 ) {
+    val successColor = Color(0xFF059669) // emerald-600
+    
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.5f))
+            .background(Color.Black.copy(alpha = 0.4f))
             .padding(16.dp),
         contentAlignment = Alignment.Center
     ) {
@@ -2248,9 +2401,9 @@ fun BatchResultsReviewDialog(
             modifier = Modifier
                 .fillMaxWidth()
                 .fillMaxHeight(0.92f),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.background),
-            shape = RoundedCornerShape(16.dp),
-            border = androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            shape = RoundedCornerShape(20.dp),
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
         ) {
             Column(
                 modifier = Modifier
@@ -2273,7 +2426,7 @@ fun BatchResultsReviewDialog(
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = "Visualiza y edita los campos extraídos antes de sumarlos al inventario general.",
-                            fontSize = 11.sp,
+                            style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             lineHeight = 14.sp
                         )
@@ -2304,12 +2457,12 @@ fun BatchResultsReviewDialog(
                             border = androidx.compose.foundation.BorderStroke(
                                 1.dp,
                                 when (item.status) {
-                                    com.example.ui.BatchItemStatus.SUCCESS -> Color(0xFF10B981).copy(alpha = 0.35f)
+                                    com.example.ui.BatchItemStatus.SUCCESS -> successColor.copy(alpha = 0.35f)
                                     com.example.ui.BatchItemStatus.ERROR -> MaterialTheme.colorScheme.error.copy(alpha = 0.35f)
                                     else -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
                                 }
                             ),
-                            shape = RoundedCornerShape(12.dp)
+                            shape = RoundedCornerShape(14.dp)
                         ) {
                             Row(
                                 modifier = Modifier.padding(12.dp),
@@ -2327,6 +2480,13 @@ fun BatchResultsReviewDialog(
                                         .align(Alignment.CenterVertically)
                                 )
 
+                                val textFieldColors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                    focusedLabelColor = MaterialTheme.colorScheme.primary,
+                                    unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                                    unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+
                                 // Form text inputs
                                 Column(
                                     modifier = Modifier.weight(1f),
@@ -2339,17 +2499,14 @@ fun BatchResultsReviewDialog(
                                             onValueChange = {
                                                 viewModel.updateBatchItemDetails(item.id, item.extractedModel, it, item.extractedSize)
                                             },
-                                            label = { Text("Código UPC (Barras)", fontSize = 10.sp) },
+                                            label = { Text("Código UPC (Barras)", style = MaterialTheme.typography.labelSmall) },
                                             singleLine = true,
-                                            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Bold),
+                                            textStyle = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                                             modifier = Modifier
                                                 .fillMaxWidth()
                                                 .height(58.dp),
-                                            shape = RoundedCornerShape(10.dp),
-                                            colors = OutlinedTextFieldDefaults.colors(
-                                                unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
-                                                focusedLabelColor = MaterialTheme.colorScheme.primary
-                                            ),
+                                            shape = RoundedCornerShape(12.dp),
+                                            colors = textFieldColors,
                                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                                         )
 
@@ -2360,17 +2517,14 @@ fun BatchResultsReviewDialog(
                                                 onValueChange = {
                                                     viewModel.updateBatchItemDetails(item.id, it, item.extractedUpc, item.extractedSize)
                                                 },
-                                                label = { Text("Modelo", fontSize = 10.sp) },
+                                                label = { Text("Modelo", style = MaterialTheme.typography.labelSmall) },
                                                 singleLine = true,
-                                                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp),
+                                                textStyle = MaterialTheme.typography.bodyMedium,
                                                 modifier = Modifier
                                                     .weight(1.4f)
                                                     .height(56.dp),
-                                                colors = OutlinedTextFieldDefaults.colors(
-                                                    unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
-                                                    focusedLabelColor = MaterialTheme.colorScheme.primary
-                                                ),
-                                                shape = RoundedCornerShape(10.dp)
+                                                colors = textFieldColors,
+                                                shape = RoundedCornerShape(12.dp)
                                             )
 
                                             // Size
@@ -2379,17 +2533,14 @@ fun BatchResultsReviewDialog(
                                                 onValueChange = {
                                                     viewModel.updateBatchItemDetails(item.id, item.extractedModel, item.extractedUpc, it)
                                                 },
-                                                label = { Text("Talla", fontSize = 10.sp) },
+                                                label = { Text("Talla", style = MaterialTheme.typography.labelSmall) },
                                                 singleLine = true,
-                                                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp),
+                                                textStyle = MaterialTheme.typography.bodyMedium,
                                                 modifier = Modifier
                                                     .weight(1f)
                                                     .height(56.dp),
-                                                colors = OutlinedTextFieldDefaults.colors(
-                                                    unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
-                                                    focusedLabelColor = MaterialTheme.colorScheme.primary
-                                                ),
-                                                shape = RoundedCornerShape(10.dp)
+                                                colors = textFieldColors,
+                                                shape = RoundedCornerShape(12.dp)
                                             )
                                         }
                                     } else if (item.status == com.example.ui.BatchItemStatus.PROCESSING) {
@@ -2400,9 +2551,9 @@ fun BatchResultsReviewDialog(
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                                                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.5.dp)
                                                 Spacer(modifier = Modifier.width(8.dp))
-                                                Text("Gemini analizando...", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+                                                Text("Gemini analizando...", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
                                             }
                                         }
                                     } else {
@@ -2416,13 +2567,13 @@ fun BatchResultsReviewDialog(
                                                 text = "Etiqueta no procesada",
                                                 color = MaterialTheme.colorScheme.error,
                                                 fontWeight = FontWeight.Bold,
-                                                fontSize = 11.sp
+                                                style = MaterialTheme.typography.labelMedium
                                             )
                                             Spacer(modifier = Modifier.height(2.dp))
                                             Text(
                                                 text = item.errorMessage ?: "Conexión rechazada. Intenta de nuevo.",
+                                                style = MaterialTheme.typography.bodySmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                fontSize = 10.sp,
                                                 maxLines = 3,
                                                 overflow = TextOverflow.Ellipsis,
                                                 lineHeight = 14.sp
@@ -2484,7 +2635,8 @@ fun BatchResultsReviewDialog(
                         modifier = Modifier
                             .weight(1f)
                             .height(48.dp),
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant)
                     ) {
                         Text("Regresar")
                     }
@@ -2497,11 +2649,11 @@ fun BatchResultsReviewDialog(
                             .weight(1.5f)
                             .height(48.dp),
                         shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981))
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                     ) {
-                        Icon(imageVector = Icons.Default.Add, contentDescription = "Guardar", modifier = Modifier.size(16.dp), tint = Color.White)
+                        Icon(imageVector = Icons.Default.Add, contentDescription = "Guardar", modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onPrimary)
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Confirmar y Guardar ($validCount)", fontWeight = FontWeight.Bold, color = Color.White)
+                        Text("Confirmar y Guardar ($validCount)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimary)
                     }
                 }
             }
