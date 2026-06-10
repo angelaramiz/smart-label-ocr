@@ -18,3 +18,4 @@ local.properties
 .env.example
 debug.keystore
 build_apk.ps1   
+*.jks
