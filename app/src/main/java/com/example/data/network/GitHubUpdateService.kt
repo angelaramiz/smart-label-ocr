@@ -94,11 +94,16 @@ fun downloadAndInstallApk(context: Context, downloadUrl: String, fileName: Strin
                 if (cursor.moveToFirst()) {
                     val statusIdx = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS)
                     if (statusIdx != -1 && cursor.getInt(statusIdx) == DownloadManager.STATUS_SUCCESSFUL) {
-                        val localUriIdx = cursor.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI)
-                        if (localUriIdx != -1) {
-                            val fileUriString = cursor.getString(localUriIdx)
-                            val fileUri = Uri.parse(fileUriString)
-                            installApk(ctx, fileUri)
+                        val file = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), fileName)
+                        if (file.exists()) {
+                            installApk(ctx, Uri.fromFile(file))
+                        } else {
+                            val localUriIdx = cursor.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI)
+                            if (localUriIdx != -1) {
+                                val fileUriString = cursor.getString(localUriIdx)
+                                val fileUri = Uri.parse(fileUriString)
+                                installApk(ctx, fileUri)
+                            }
                         }
                     }
                 }
