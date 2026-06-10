@@ -19,3 +19,4 @@ local.properties
 debug.keystore
 build_apk.ps1
 *.jks
+notas/
