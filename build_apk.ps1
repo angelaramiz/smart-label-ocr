@@ -7,12 +7,12 @@ $env:STORE_PASSWORD="labelscan_secret_pass"
 $env:KEY_PASSWORD="labelscan_secret_pass"
 
 Write-Host "Compilando aplicación en modo RELEASE..." -ForegroundColor Cyan
-.\gradlew.bat clean assembleRelease
+.\gradlew.bat assembleRelease
 
 if ($LASTEXITCODE -eq 0) {
     Write-Host "Copiando APK compilada (Release) a la raíz..." -ForegroundColor Green
     Copy-Item app/build/outputs/apk/release/app-release.apk smart-label-ocr-release.apk -Force
     Write-Host "¡Listo! smart-label-ocr-release.apk ha sido actualizada." -ForegroundColor Green
 } else {
-    Write-Error "Error durante la compilación Gradle."
+    Write-Error "Error durante la compilación Gradle. Si el error fue por directorios bloqueados en Windows, intenta ejecutar '.\gradlew.bat --stop' en la terminal o cerrar Android Studio."
 }
