@@ -1,0 +1,52 @@
+name: Build and Release APK
+
+on:
+  push:
+    tags:
+      - 'v*' # Se activa automáticamente cuando haces push a un tag de versión (ej. v1.1, v1.0.2)
+
+jobs:
+  build:
+    name: Build APK & Create Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Necesario para poder crear el release y subir archivos
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Create empty env files for compilation
+        run: |
+          echo "GEMINI_API_KEY=MY_GEMINI_API_KEY" > .env
+          echo "GROQ_API_KEY=MY_GROQ_API_KEY" >> .env
+          echo "HF_API_KEY=MY_HF_API_KEY" >> .env
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build Debug APK
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Rename APK for release
+        run: cp app/build/outputs/apk/debug/app-debug.apk app-debug.apk
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: app-debug.apk
+          name: Release ${{ github.ref_name }}
+          body: |
+            Nueva actualización automática de LabelScan AI.
+            Versión: ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

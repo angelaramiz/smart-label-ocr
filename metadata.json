@@ -1,0 +1,6 @@
+{
+  "name": "Smart Label OCR",
+  "description": "Extracts shoe/clothing products details (UPC, Model, Size) with Gemini 2.5 Flash OCR, counts matching items, and displays them in grouped Excel-like spreadsheets.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
