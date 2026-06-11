@@ -49,12 +49,12 @@ object GeminiService {
         val groqKey = BuildConfig.GROQ_API_KEY
         if (groqKey.isNotEmpty() && groqKey != "MY_GROQ_API_KEY") {
             try {
-                Log.d(TAG, "Routing to Groq API using Llama 3.2 Vision")
+                Log.d(TAG, "Routing to Groq API using Llama 4 Scout")
                 val base64Image = bitmap.toBase64()
                 return@withContext callOpenAiCompatibleApi(
                     url = "https://api.groq.com/openai/v1/chat/completions",
                     apiKey = groqKey,
-                    model = "llama-3.2-11b-vision-preview",
+                    model = "meta-llama/llama-4-scout-17b-16e-instruct",
                     base64Image = base64Image
                 )
             } catch (e: Exception) {
@@ -312,7 +312,7 @@ object GeminiService {
     fun getActiveProviderName(): String {
         val groqKey = BuildConfig.GROQ_API_KEY
         if (groqKey.isNotEmpty() && groqKey != "MY_GROQ_API_KEY") {
-            return "Groq (Llama 3.2 Vision)"
+            return "Groq (Llama 4 Scout)"
         }
         val hfKey = BuildConfig.HF_API_KEY
         if (hfKey.isNotEmpty() && hfKey != "MY_HF_API_KEY") {
