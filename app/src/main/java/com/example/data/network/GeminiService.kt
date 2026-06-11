@@ -29,7 +29,7 @@ object GeminiService {
     private fun Bitmap.toBase64(): String {
         val outputStream = ByteArrayOutputStream()
         // Resize slightly if the image is huge to save tokens and speed up upload
-        val maxDimension = 1024
+        val maxDimension = 2048
         val scaledBitmap = if (width > maxDimension || height > maxDimension) {
             val aspectRatio = width.toFloat() / height.toFloat()
             val (newWidth, newHeight) = if (width > height) {
@@ -229,6 +229,19 @@ object GeminiService {
             requestJson.put("model", model)
 
             val messagesArray = JSONArray()
+
+            // System instructions message
+            val systemMessage = JSONObject().apply {
+                put("role", "system")
+                put("content", "You are an expert product label OCR extractor. Your only task is reading clothing/footwear tags and shoe box labels, and extracting structured data. You MUST return a JSON object with properties: 'upc', 'model', and 'size'.\n" +
+                               "Rules:\n" +
+                               "1. 'upc': Must contain ONLY the numeric digits of the barcode. Barcodes on shoe boxes often have isolated digits printed slightly to the left and right of the main group (e.g., a leading '7' or trailing '3'). You MUST merge these isolated numbers to form the full UPC (usually 12 digits total). Do not include letters, spaces, or hyphens.\n" +
+                               "2. 'model': Look for the model/style code. Combine the general style code with its specific color or style code suffix using a hyphen (e.g. 'M6PG34K3200-FBDB', 'GWFASHIE-DARKRED').\n" +
+                               "3. 'size': Extract the physical shoe or clothing size (e.g. '6 M', '9', 'L', 'M').\n" +
+                               "4. OCR must be extremely precise, pay careful attention to characters (e.g. do not mix up '8' and 'B', '0' and 'O', 'M6PG' or 'M6GP').")
+            }
+            messagesArray.put(systemMessage)
+
             val userMessage = JSONObject()
             userMessage.put("role", "user")
 
@@ -236,7 +249,7 @@ object GeminiService {
 
             val textContent = JSONObject()
             textContent.put("type", "text")
-            textContent.put("text", "Perform OCR on this clothing/footwear label image. Extract the barcode UPC (numeric digits of the barcode only), the product/style model identifier combined with its color/style code suffix using a hyphen (e.g. 'M6PG34K3200-FBDB'), and the size (e.g. '6 M', '9', 'L'). Return ONLY a JSON object with properties 'upc', 'model', and 'size'.")
+            textContent.put("text", "Perform OCR on this clothing/footwear label image. Scan the barcode numbers carefully. Merge any isolated numbers on the sides of the barcode into the 'upc'. Return ONLY a JSON object matching the required schema.")
             contentArray.put(textContent)
 
             val imageContent = JSONObject()
