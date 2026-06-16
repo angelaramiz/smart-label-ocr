@@ -39,6 +39,10 @@ class ProductRepository(private val productDao: ProductDao) {
         }
     }
 
+    suspend fun findProductsByUpc(upc: String): List<ProductEntity> {
+        return productDao.findProductsByUpc(upc)
+    }
+
     suspend fun updateProduct(product: ProductEntity) {
         productDao.updateProduct(product)
     }

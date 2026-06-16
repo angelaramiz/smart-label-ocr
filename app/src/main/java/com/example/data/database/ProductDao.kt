@@ -24,6 +24,9 @@ interface ProductDao {
     @Update
     suspend fun updateProduct(product: ProductEntity)
 
+    @Query("SELECT * FROM products WHERE upc = :upc")
+    suspend fun findProductsByUpc(upc: String): List<ProductEntity>
+
     @Query("DELETE FROM products WHERE id = :id")
     suspend fun deleteProduct(id: Int)
 

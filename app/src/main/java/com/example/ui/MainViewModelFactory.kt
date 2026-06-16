@@ -12,7 +12,7 @@ class MainViewModelFactory(private val context: Context) : ViewModelProvider.Fac
             val db = AppDatabase.getDatabase(context)
             val repository = ProductRepository(db.productDao())
             @Suppress("UNCHECKED_CAST")
-            return MainViewModel(repository) as T
+            return MainViewModel(repository, context) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }

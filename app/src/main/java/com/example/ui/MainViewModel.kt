@@ -1,6 +1,7 @@
 package com.example.ui
 
 import android.graphics.Bitmap
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.database.ProductEntity
@@ -40,7 +41,177 @@ data class BatchItem(
     val errorMessage: String? = null
 )
 
-class MainViewModel(private val repository: ProductRepository) : ViewModel() {
+class MainViewModel(private val repository: ProductRepository, private val context: Context) : ViewModel() {
+
+    private val prefs = context.getSharedPreferences("label_scan_prefs", Context.MODE_PRIVATE)
+
+    private val _customGeminiKey = MutableStateFlow(prefs.getString("gemini_key", "") ?: "")
+    val customGeminiKey = _customGeminiKey.asStateFlow()
+
+    private val _customGroqKey = MutableStateFlow(prefs.getString("groq_key", "") ?: "")
+    val customGroqKey = _customGroqKey.asStateFlow()
+
+    private val _customHfKey = MutableStateFlow(prefs.getString("hf_key", "") ?: "")
+    val customHfKey = _customHfKey.asStateFlow()
+
+    private val _selectedProvider = MutableStateFlow(prefs.getString("selected_provider", "auto") ?: "auto")
+    val selectedProvider = _selectedProvider.asStateFlow()
+
+    fun saveApiKeys(gemini: String, groq: String, hf: String) {
+        prefs.edit().apply {
+            putString("gemini_key", gemini)
+            putString("groq_key", groq)
+            putString("hf_key", hf)
+            apply()
+        }
+        _customGeminiKey.value = gemini
+        _customGroqKey.value = groq
+        _customHfKey.value = hf
+    }
+
+    fun setSelectedProvider(provider: String) {
+        prefs.edit().putString("selected_provider", provider).apply()
+        _selectedProvider.value = provider
+    }
+
+    // CSV Import states
+    private val _isImporting = MutableStateFlow(false)
+    val isImporting: StateFlow<Boolean> = _isImporting.asStateFlow()
+
+    private val _importProgressText = MutableStateFlow("")
+    val importProgressText: StateFlow<String> = _importProgressText.asStateFlow()
+
+    private val _importErrorDetails = MutableStateFlow<List<String>?>(null)
+    val importErrorDetails: StateFlow<List<String>?> = _importErrorDetails.asStateFlow()
+
+    private val _showImportSummary = MutableStateFlow<String?>(null)
+    val showImportSummary: StateFlow<String?> = _showImportSummary.asStateFlow()
+
+    fun clearImportSummary() {
+        _showImportSummary.value = null
+        _importErrorDetails.value = null
+    }
+
+    fun importCsv(uri: android.net.Uri) {
+        viewModelScope.launch {
+            _isImporting.value = true
+            _importProgressText.value = "Abriendo archivo..."
+            _importErrorDetails.value = null
+            _showImportSummary.value = null
+            
+            try {
+                val inputStream = context.contentResolver.openInputStream(uri)
+                if (inputStream == null) {
+                    _toastMessage.value = "No se pudo abrir el archivo CSV."
+                    _isImporting.value = false
+                    return@launch
+                }
+                
+                _importProgressText.value = "Procesando archivo CSV..."
+                val reader = java.io.BufferedReader(java.io.InputStreamReader(inputStream))
+                val lines = reader.readLines()
+                if (lines.isEmpty()) {
+                    _toastMessage.value = "El archivo CSV está vacío."
+                    _isImporting.value = false
+                    return@launch
+                }
+
+                // Header validation
+                val firstLine = lines.first()
+                val separators = listOf(",", ";")
+                var selectedSeparator = ","
+                var headerTokens = firstLine.split(",")
+                
+                // Determine separator
+                if (firstLine.contains(";") && !firstLine.contains(",")) {
+                    selectedSeparator = ";"
+                    headerTokens = firstLine.split(";")
+                }
+                
+                val headers = headerTokens.map { it.trim().uppercase().removeSurrounding("\"") }
+                
+                val upcIdx = headers.indexOfFirst { it == "UPC" || it == "CODIGO" || it == "CÓDIGO" || it == "BARCODE" }
+                val modelIdx = headers.indexOfFirst { it == "MODELO" || it == "MODEL" || it == "ESTILO" }
+                val sizeIdx = headers.indexOfFirst { it == "TALLA" || it == "SIZE" }
+                val qtyIdx = headers.indexOfFirst { it == "CANTIDAD" || it == "CANT" || it == "QUANTITY" || it == "QTY" }
+
+                if (upcIdx == -1 || modelIdx == -1 || sizeIdx == -1 || qtyIdx == -1) {
+                    _toastMessage.value = "Formato de CSV inválido. Columnas requeridas: UPC, MODELO, TALLA, CANTIDAD."
+                    _isImporting.value = false
+                    return@launch
+                }
+
+                var successCount = 0
+                var errorCount = 0
+                val errorList = mutableListOf<String>()
+
+                for (i in 1 until lines.size) {
+                    val line = lines[i].trim()
+                    if (line.isEmpty()) continue
+
+                    val tokens = line.split(selectedSeparator).map { it.trim().removeSurrounding("\"") }
+                    val maxIndexNeeded = maxOf(upcIdx, modelIdx, sizeIdx, qtyIdx)
+                    
+                    if (tokens.size <= maxIndexNeeded) {
+                        errorCount++
+                        errorList.add("Fila ${i + 1}: Columnas incompletas (esperadas al menos ${maxIndexNeeded + 1}, encontradas ${tokens.size}).")
+                        continue
+                    }
+
+                    val upc = tokens[upcIdx]
+                    val model = tokens[modelIdx]
+                    val size = tokens[sizeIdx]
+                    val qtyStr = tokens[qtyIdx]
+
+                    if (upc.isEmpty() || model.isEmpty() || size.isEmpty()) {
+                        errorCount++
+                        errorList.add("Fila ${i + 1}: Datos vacíos (UPC, modelo o talla faltantes).")
+                        continue
+                    }
+
+                    val qty = qtyStr.toIntOrNull()
+                    if (qty == null || qty <= 0) {
+                        errorCount++
+                        errorList.add("Fila ${i + 1}: Cantidad inválida ($qtyStr). Debe ser un número mayor a 0.")
+                        continue
+                    }
+
+                    // Insert or increment in DB
+                    repository.addOrIncrementProduct(upc, model, size, "", qty)
+                    successCount++
+                }
+
+                if (errorList.isNotEmpty()) {
+                    _importErrorDetails.value = errorList
+                }
+                
+                _showImportSummary.value = "Importación completada:\n- $successCount registros cargados con éxito.\n- $errorCount filas ignoradas con errores."
+                _toastMessage.value = "Carga CSV finalizada con ${if (errorCount > 0) "algunos errores" else "éxito"}"
+            } catch (e: Exception) {
+                _toastMessage.value = "Error al leer CSV: ${e.message}"
+            } finally {
+                _isImporting.value = false
+            }
+        }
+    }
+
+    fun incrementStockByUpc(upc: String, onMatched: (ProductEntity) -> Unit, onNotFound: () -> Unit) {
+        viewModelScope.launch {
+            try {
+                val matches = repository.findProductsByUpc(upc)
+                if (matches.isNotEmpty()) {
+                    val firstMatch = matches.first()
+                    val newQty = firstMatch.quantity + 1
+                    repository.updateQuantity(firstMatch, newQty)
+                    onMatched(firstMatch.copy(quantity = newQty))
+                } else {
+                    onNotFound()
+                }
+            } catch (e: Exception) {
+                _toastMessage.value = "Error al buscar UPC: ${e.message}"
+            }
+        }
+    }
 
     // Reactive inventory list from database
     val inventoryList: StateFlow<List<ProductEntity>> = repository.allProducts
@@ -155,7 +326,13 @@ class MainViewModel(private val repository: ProductRepository) : ViewModel() {
         }
         
         viewModelScope.launch {
-            when (val result = GeminiService.analyzeLabelImage(item.bitmap)) {
+            when (val result = GeminiService.analyzeLabelImage(
+                bitmap = item.bitmap,
+                customGeminiKey = _customGeminiKey.value,
+                customGroqKey = _customGroqKey.value,
+                customHfKey = _customHfKey.value,
+                selectedProvider = _selectedProvider.value
+            )) {
                 is OcrResult.Success -> {
                     _batchQueue.value = _batchQueue.value.map {
                         if (it.id == id) {
@@ -222,7 +399,13 @@ class MainViewModel(private val repository: ProductRepository) : ViewModel() {
                         if (it.id == item.id) it.copy(status = BatchItemStatus.PROCESSING, errorMessage = null) else it
                     }
                     
-                    val result = GeminiService.analyzeLabelImage(item.bitmap)
+                    val result = GeminiService.analyzeLabelImage(
+                        bitmap = item.bitmap,
+                        customGeminiKey = _customGeminiKey.value,
+                        customGroqKey = _customGroqKey.value,
+                        customHfKey = _customHfKey.value,
+                        selectedProvider = _selectedProvider.value
+                    )
                     finalResult = result
                     
                     if (result is OcrResult.Success) {
@@ -338,7 +521,13 @@ class MainViewModel(private val repository: ProductRepository) : ViewModel() {
             _scanState.value = ScanState.Processing
             _verificationProduct.value = null
 
-            when (val result = GeminiService.analyzeLabelImage(bitmap)) {
+            when (val result = GeminiService.analyzeLabelImage(
+                bitmap = bitmap,
+                customGeminiKey = _customGeminiKey.value,
+                customGroqKey = _customGroqKey.value,
+                customHfKey = _customHfKey.value,
+                selectedProvider = _selectedProvider.value
+            )) {
                 is OcrResult.Success -> {
                     _scanState.value = ScanState.Success(
                         upc = result.upc,

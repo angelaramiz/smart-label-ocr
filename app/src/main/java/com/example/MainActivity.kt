@@ -108,6 +108,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -129,6 +131,35 @@ import com.example.ui.theme.MyApplicationTheme
 import kotlinx.coroutines.launch
 import java.io.File
 import java.io.FileOutputStream
+// CameraX
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageCapture
+import androidx.camera.core.ImageCaptureException
+import androidx.camera.core.Preview
+import androidx.camera.core.ImageAnalysis
+import kotlin.OptIn
+import androidx.camera.core.ExperimentalGetImage
+import com.google.mlkit.vision.barcode.BarcodeScanning
+import com.google.mlkit.vision.common.InputImage
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
+import com.google.accompanist.permissions.ExperimentalPermissionsApi
+import com.google.accompanist.permissions.isGranted
+import com.google.accompanist.permissions.rememberPermissionState
+import java.io.ByteArrayOutputStream
+import java.util.concurrent.Executors
+import androidx.compose.runtime.DisposableEffect
+import androidx.lifecycle.compose.LocalLifecycleOwner
+
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -177,6 +208,62 @@ fun Modifier.cellBorder(
     }
 }
 
+val BarcodeIcon: ImageVector
+    get() = ImageVector.Builder(
+        name = "Barcode",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f
+    ).apply {
+        path(fill = androidx.compose.ui.graphics.SolidColor(Color.Black)) {
+            moveTo(2f, 4f)
+            lineTo(4f, 4f)
+            lineTo(4f, 20f)
+            lineTo(2f, 20f)
+            close()
+        }
+        path(fill = androidx.compose.ui.graphics.SolidColor(Color.Black)) {
+            moveTo(6f, 4f)
+            lineTo(7f, 4f)
+            lineTo(7f, 20f)
+            lineTo(6f, 20f)
+            close()
+        }
+        path(fill = androidx.compose.ui.graphics.SolidColor(Color.Black)) {
+            moveTo(9f, 4f)
+            lineTo(12f, 4f)
+            lineTo(12f, 20f)
+            lineTo(9f, 20f)
+            close()
+        }
+        path(fill = androidx.compose.ui.graphics.SolidColor(Color.Black)) {
+            moveTo(14f, 4f)
+            lineTo(15f, 4f)
+            lineTo(15f, 20f)
+            lineTo(14f, 20f)
+            close()
+        }
+        path(fill = androidx.compose.ui.graphics.SolidColor(Color.Black)) {
+            moveTo(17f, 4f)
+            lineTo(19f, 4f)
+            lineTo(19f, 20f)
+            lineTo(17f, 20f)
+            close()
+        }
+        path(fill = androidx.compose.ui.graphics.SolidColor(Color.Black)) {
+            moveTo(21f, 4f)
+            lineTo(22f, 4f)
+            lineTo(22f, 20f)
+            lineTo(21f, 20f)
+            close()
+        }
+    }.build()
+
+enum class CameraScanMode {
+    OCR_LABEL,
+    BARCODE_ONLY
+}
 
 @Composable
 fun MainScreen(viewModel: MainViewModel, modifier: Modifier = Modifier) {
@@ -188,6 +275,21 @@ fun MainScreen(viewModel: MainViewModel, modifier: Modifier = Modifier) {
     val scanState by viewModel.scanState.collectAsState()
     val toastMessage by viewModel.toastMessage.collectAsState()
     val verificationProduct by viewModel.verificationProduct.collectAsState()
+
+    val isImporting by viewModel.isImporting.collectAsState()
+    val importProgressText by viewModel.importProgressText.collectAsState()
+    val importErrorDetails by viewModel.importErrorDetails.collectAsState()
+    val showImportSummary by viewModel.showImportSummary.collectAsState()
+
+    val customGeminiKey by viewModel.customGeminiKey.collectAsState()
+    val customGroqKey by viewModel.customGroqKey.collectAsState()
+    val customHfKey by viewModel.customHfKey.collectAsState()
+    val selectedProvider by viewModel.selectedProvider.collectAsState()
+
+    var showConfigDialog by remember { mutableStateOf(false) }
+    var scanMode by remember { mutableStateOf(CameraScanMode.OCR_LABEL) }
+    var onBarcodeScanResult by remember { mutableStateOf<((String) -> Unit)?>(null) }
+    var prefilledBarcodeForManualAdd by remember { mutableStateOf("") }
 
     // Batch states from ViewModel
     val isBatchMode by viewModel.isBatchMode.collectAsState()
@@ -213,9 +315,13 @@ fun MainScreen(viewModel: MainViewModel, modifier: Modifier = Modifier) {
     // File structure for Camera captures
     var cameraImageUri by remember { mutableStateOf<Uri?>(null) }
 
+    // CameraX viewfinder screen state
+    var showCameraViewfinder by remember { mutableStateOf(false) }
+
     // GitHub Auto-update states
     var showUpdateDialog by remember { mutableStateOf(false) }
     var latestReleaseInfo by remember { mutableStateOf<com.example.data.network.GitHubUpdateService.ReleaseInfo?>(null) }
+
 
     LaunchedEffect(Unit) {
         val latest = com.example.data.network.GitHubUpdateService.checkForUpdates()
@@ -278,6 +384,15 @@ fun MainScreen(viewModel: MainViewModel, modifier: Modifier = Modifier) {
         }
     }
 
+    // Launcher for Selecting CSV Files
+    val csvPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            viewModel.importCsv(uri)
+        }
+    }
+
     // Auto-completion detection of a running active batch with real-time sound/vibration alerts
     var previouslyProcessing by remember { mutableStateOf(false) }
     LaunchedEffect(isBatchProcessing) {
@@ -300,8 +415,17 @@ fun MainScreen(viewModel: MainViewModel, modifier: Modifier = Modifier) {
             .fillMaxSize()
             .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
+        val activeProviderName = com.example.data.network.GeminiService.getActiveProviderName(
+            customGeminiKey = customGeminiKey,
+            customGroqKey = customGroqKey,
+            customHfKey = customHfKey,
+            selectedProvider = selectedProvider
+        )
+
         // App Header Row
         HeaderBar(
+            activeProviderName = activeProviderName,
+            onConfigClick = { showConfigDialog = true },
             onClearAll = { viewModel.clearAllInventory() },
             onCheckForUpdates = {
                 scope.launch {
@@ -379,50 +503,158 @@ fun MainScreen(viewModel: MainViewModel, modifier: Modifier = Modifier) {
                             shape = RoundedCornerShape(14.dp),
                             border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
                         ) {
-                            Row(
-                                modifier = Modifier
-                                    .padding(12.dp)
-                                    .fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
+                            Column(modifier = Modifier.fillMaxWidth()) {
                                 Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.weight(1f)
+                                    modifier = Modifier
+                                        .padding(12.dp)
+                                        .fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(36.dp)
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
-                                        contentAlignment = Alignment.Center
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.weight(1f)
                                     ) {
-                                        Icon(
-                                            imageVector = if (isBatchMode) Icons.AutoMirrored.Filled.List else Icons.Default.Home,
-                                            contentDescription = "Operating Mode",
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(18.dp)
-                                        )
+                                        Box(
+                                            modifier = Modifier
+                                                .size(36.dp)
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = if (isBatchMode) Icons.AutoMirrored.Filled.List else Icons.Default.Home,
+                                                contentDescription = "Operating Mode",
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Column {
+                                            Text(
+                                                text = if (isBatchMode) "Modo Lote (Cola Activa)" else "Modo Escaneo Individual",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 13.sp,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Text(
+                                                text = if (isBatchMode) "Buffer de fotos con límites RPM and revisión" else "Procesa una etiqueta a la vez",
+                                                fontSize = 11.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
                                     }
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Column {
-                                        Text(
-                                            text = if (isBatchMode) "Modo Lote (Cola Activa)" else "Modo Escaneo Individual",
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 13.sp,
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                        Text(
-                                            text = if (isBatchMode) "Buffer de fotos con límites RPM and revisión" else "Procesa una etiqueta a la vez",
-                                            fontSize = 11.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
+                                    Switch(
+                                        checked = isBatchMode,
+                                        onCheckedChange = { viewModel.setBatchMode(it) }
+                                    )
+                                }
+
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(horizontal = 12.dp),
+                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                                )
+
+                                Row(
+                                    modifier = Modifier
+                                        .padding(12.dp)
+                                        .fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(36.dp)
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = "🤖",
+                                                fontSize = 18.sp
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Column {
+                                            Text(
+                                                text = "Proveedor de OCR / IA",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 13.sp,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Text(
+                                                text = "Proveedor activo para procesar",
+                                                fontSize = 11.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                    
+                                    var providerMenuExpanded by remember { mutableStateOf(false) }
+                                    Box {
+                                        OutlinedButton(
+                                            onClick = { providerMenuExpanded = true },
+                                            shape = RoundedCornerShape(8.dp),
+                                            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary),
+                                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
+                                            modifier = Modifier.height(36.dp)
+                                        ) {
+                                            Text(
+                                                text = when (selectedProvider) {
+                                                    "gemini" -> "Gemini"
+                                                    "groq" -> "Groq"
+                                                    "hf" -> "HF (Qwen)"
+                                                    else -> "Auto"
+                                                },
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                            Icon(
+                                                imageVector = Icons.Default.KeyboardArrowDown,
+                                                contentDescription = "Expandir",
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                        
+                                        DropdownMenu(
+                                            expanded = providerMenuExpanded,
+                                            onDismissRequest = { providerMenuExpanded = false }
+                                        ) {
+                                            DropdownMenuItem(
+                                                text = { Text("Automático (Groq -> HF -> Gemini)") },
+                                                onClick = {
+                                                    viewModel.setSelectedProvider("auto")
+                                                    providerMenuExpanded = false
+                                                }
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text("Google Gemini 2.5 Flash") },
+                                                onClick = {
+                                                    viewModel.setSelectedProvider("gemini")
+                                                    providerMenuExpanded = false
+                                                }
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text("Groq (Llama 4 Scout)") },
+                                                onClick = {
+                                                    viewModel.setSelectedProvider("groq")
+                                                    providerMenuExpanded = false
+                                                }
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text("Hugging Face (Qwen2-VL)") },
+                                                onClick = {
+                                                    viewModel.setSelectedProvider("hf")
+                                                    providerMenuExpanded = false
+                                                }
+                                            )
+                                        }
                                     }
                                 }
-                                Switch(
-                                    checked = isBatchMode,
-                                    onCheckedChange = { viewModel.setBatchMode(it) }
-                                )
                             }
                         }
                     }
@@ -436,14 +668,25 @@ fun MainScreen(viewModel: MainViewModel, modifier: Modifier = Modifier) {
                                 scanState = scanState,
                                 onLaunchGallery = { galleryLauncher.launch("image/*") },
                                 onLaunchCamera = {
-                                    val tempFile = File(context.cacheDir, "camera_label_${System.currentTimeMillis()}.jpg")
-                                    val uri = FileProvider.getUriForFile(
-                                        context,
-                                        "${context.packageName}.fileprovider",
-                                        tempFile
-                                    )
-                                    cameraImageUri = uri
-                                    cameraLauncher.launch(uri)
+                                    scanMode = CameraScanMode.OCR_LABEL
+                                    showCameraViewfinder = true
+                                },
+                                onLaunchBarcode = {
+                                    scanMode = CameraScanMode.BARCODE_ONLY
+                                    onBarcodeScanResult = { barcode ->
+                                        viewModel.incrementStockByUpc(
+                                            upc = barcode,
+                                            onMatched = { product ->
+                                                Toast.makeText(context, "Cantidad del producto ${product.model} (${product.size}) incrementada a ${product.quantity}", Toast.LENGTH_LONG).show()
+                                            },
+                                            onNotFound = {
+                                                Toast.makeText(context, "Código $barcode no encontrado. Ingrese los detalles manualmente.", Toast.LENGTH_LONG).show()
+                                                prefilledBarcodeForManualAdd = barcode
+                                                showManualAddDialog = true
+                                            }
+                                        )
+                                    }
+                                    showCameraViewfinder = true
                                 },
                                 onSimulateReferenceLabel = {
                                     // High Craftsmanship UI simulator of the exact footwear labels specified in the prompt
@@ -555,6 +798,13 @@ fun MainScreen(viewModel: MainViewModel, modifier: Modifier = Modifier) {
                                         viewModel.setScanStateIdle()
                                         selectedImageUri = null
                                         selectedBitmap = null
+                                    },
+                                    onScanBarcodeClick = { callback ->
+                                        scanMode = CameraScanMode.BARCODE_ONLY
+                                        onBarcodeScanResult = { barcode ->
+                                            callback(barcode)
+                                        }
+                                        showCameraViewfinder = true
                                     }
                                 )
                             }
@@ -576,6 +826,23 @@ fun MainScreen(viewModel: MainViewModel, modifier: Modifier = Modifier) {
                                     )
                                     cameraImageUri = uri
                                     cameraLauncher.launch(uri)
+                                },
+                                onLaunchBarcode = {
+                                    scanMode = CameraScanMode.BARCODE_ONLY
+                                    onBarcodeScanResult = { barcode ->
+                                        viewModel.incrementStockByUpc(
+                                            upc = barcode,
+                                            onMatched = { product ->
+                                                Toast.makeText(context, "Cantidad del producto ${product.model} (${product.size}) incrementada a ${product.quantity}", Toast.LENGTH_LONG).show()
+                                            },
+                                            onNotFound = {
+                                                Toast.makeText(context, "Código $barcode no encontrado. Ingrese los detalles manualmente.", Toast.LENGTH_LONG).show()
+                                                prefilledBarcodeForManualAdd = barcode
+                                                showManualAddDialog = true
+                                            }
+                                        )
+                                    }
+                                    showCameraViewfinder = true
                                 },
                                 onSimulateReferenceLabel = {
                                     injectMockBatchProducts(viewModel, context)
@@ -636,39 +903,56 @@ fun MainScreen(viewModel: MainViewModel, modifier: Modifier = Modifier) {
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    // Action row (Export / Manual Add)
-                    Row(
+                    // Action rows (Import, Export, Manual Add)
+                    Column(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        OutlinedButton(
-                            onClick = {
-                                val csv = viewModel.getInventoryCsvString()
-                                if (csv.isEmpty()) {
-                                    Toast.makeText(context, "No hay productos que exportar", Toast.LENGTH_SHORT).show()
-                                } else {
-                                    shareCsvAndSave(context, csv)
-                                }
-                            },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))
-                        ) {
-                            Icon(imageVector = Icons.Default.Share, contentDescription = "Exportar")
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Exportar Excel (CSV)")
-                        }
-
                         Button(
                             onClick = { showManualAddDialog = true },
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.fillMaxWidth().height(48.dp),
                             shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                         ) {
                             Icon(imageVector = Icons.Default.Add, contentDescription = "Manual")
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Agregar Manual")
+                            Text("Agregar Producto Manual", fontWeight = FontWeight.Bold)
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = { csvPickerLauncher.launch("text/*") },
+                                modifier = Modifier.weight(1f).height(44.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))
+                            ) {
+                                Icon(imageVector = Icons.Default.Refresh, contentDescription = "Importar")
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Importar CSV", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    val csv = viewModel.getInventoryCsvString()
+                                    if (csv.isEmpty()) {
+                                        Toast.makeText(context, "No hay productos que exportar", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        shareCsvAndSave(context, csv)
+                                    }
+                                },
+                                modifier = Modifier.weight(1f).height(44.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))
+                            ) {
+                                Icon(imageVector = Icons.Default.Share, contentDescription = "Exportar")
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Exportar CSV", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
 
@@ -730,10 +1014,22 @@ fun MainScreen(viewModel: MainViewModel, modifier: Modifier = Modifier) {
     // Manual Entry Dialog pop-up
     if (showManualAddDialog) {
         ManualFormDialog(
-            onDismiss = { showManualAddDialog = false },
+            initialUpc = prefilledBarcodeForManualAdd,
+            onDismiss = { 
+                showManualAddDialog = false
+                prefilledBarcodeForManualAdd = ""
+            },
             onConfirm = { m, u, s, c, q ->
                 viewModel.commitProduct(u, m, s, c, q)
                 showManualAddDialog = false
+                prefilledBarcodeForManualAdd = ""
+            },
+            onScanBarcodeClick = { callback ->
+                scanMode = CameraScanMode.BARCODE_ONLY
+                onBarcodeScanResult = { barcode ->
+                    callback(barcode)
+                }
+                showCameraViewfinder = true
             }
         )
     }
@@ -770,10 +1066,147 @@ fun MainScreen(viewModel: MainViewModel, modifier: Modifier = Modifier) {
             }
         )
     }
+
+    // ===== CSV Import Loading Overlay =====
+    if (isImporting) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.5f))
+                .clickable(enabled = false) {},
+            contentAlignment = Alignment.Center
+        ) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                shape = RoundedCornerShape(16.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                modifier = Modifier.padding(32.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = importProgressText,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+        }
+    }
+
+    // ===== CSV Import Summary Dialog =====
+    if (showImportSummary != null) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { viewModel.clearImportSummary() },
+            title = {
+                Text(
+                    text = "Resumen de Importación",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            },
+            text = {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = showImportSummary!!,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    
+                    if (!importErrorDetails.isNullOrEmpty()) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = "Errores Encontrados:",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(160.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.15f))
+                                .border(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
+                                .padding(8.dp)
+                        ) {
+                            items(importErrorDetails!!) { error ->
+                                Text(
+                                    text = "• $error",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                    modifier = Modifier.padding(vertical = 2.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { viewModel.clearImportSummary() },
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    Text("Aceptar")
+                }
+            }
+        )
+    }
+
+    // ===== API Keys Configuration Dialog =====
+    if (showConfigDialog) {
+        ApiConfigDialog(
+            initialGemini = customGeminiKey,
+            initialGroq = customGroqKey,
+            initialHf = customHfKey,
+            onDismiss = { showConfigDialog = false },
+            onSave = { gem, gro, hf ->
+                viewModel.saveApiKeys(gem, gro, hf)
+                Toast.makeText(context, "API Keys actualizadas con éxito", Toast.LENGTH_SHORT).show()
+            }
+        )
+    }
+
+    // ===== CameraX Viewfinder Screen (full screen overlay) =====
+    if (showCameraViewfinder) {
+        CameraViewfinderScreen(
+            scanMode = scanMode,
+            onPhotoCaptured = { bitmap ->
+                showCameraViewfinder = false
+                val cropped = cropAndCompressBitmap(bitmap)
+                selectedBitmap = cropped
+                selectedImageUri = null
+                if (isBatchMode) {
+                    viewModel.addImageToBatch(cropped, Uri.EMPTY)
+                } else {
+                    viewModel.analyzeLabel(cropped)
+                }
+            },
+            onBarcodeCaptured = { barcode ->
+                showCameraViewfinder = false
+                onBarcodeScanResult?.invoke(barcode)
+            },
+            onClose = { showCameraViewfinder = false }
+        )
+    }
 }
 
 @Composable
-fun HeaderBar(onClearAll: () -> Unit, onCheckForUpdates: () -> Unit) {
+fun HeaderBar(
+    activeProviderName: String,
+    onConfigClick: () -> Unit,
+    onClearAll: () -> Unit,
+    onCheckForUpdates: () -> Unit
+) {
     var showConfirmClear by remember { mutableStateOf(false) }
     var menuExpanded by remember { mutableStateOf(false) }
 
@@ -833,9 +1266,8 @@ fun HeaderBar(onClearAll: () -> Unit, onCheckForUpdates: () -> Unit) {
                         )
                     }
                 }
-                val activeProvider = com.example.data.network.GeminiService.getActiveProviderName()
                 Text(
-                    text = "OCR: $activeProvider",
+                    text = "OCR: $activeProviderName",
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.primary,
@@ -860,6 +1292,20 @@ fun HeaderBar(onClearAll: () -> Unit, onCheckForUpdates: () -> Unit) {
                 expanded = menuExpanded,
                 onDismissRequest = { menuExpanded = false }
             ) {
+                DropdownMenuItem(
+                    text = { Text("Configuración de API") },
+                    onClick = {
+                        menuExpanded = false
+                        onConfigClick()
+                    },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.Info,
+                            contentDescription = "Configuración",
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                )
                 DropdownMenuItem(
                     text = { Text("Comprobar actualización") },
                     onClick = {
@@ -1089,6 +1535,7 @@ fun ScannerOperationsPanel(
     scanState: ScanState,
     onLaunchGallery: () -> Unit,
     onLaunchCamera: () -> Unit,
+    onLaunchBarcode: () -> Unit,
     onSimulateReferenceLabel: () -> Unit
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
@@ -1227,9 +1674,22 @@ fun ScannerOperationsPanel(
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
             ) {
-                Icon(imageVector = Icons.Default.Edit, contentDescription = "Cámara", modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("Cámara", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Icon(imageVector = Icons.Default.Edit, contentDescription = "Cámara OCR", modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Cámara OCR", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+            }
+
+            Button(
+                onClick = onLaunchBarcode,
+                modifier = Modifier.weight(1f).height(48.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.secondary
+                )
+            ) {
+                Icon(imageVector = BarcodeIcon, contentDescription = "Escanear Barras", modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Escanear Barras", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
             }
 
             Button(
@@ -1242,9 +1702,9 @@ fun ScannerOperationsPanel(
                 ),
                 border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f))
             ) {
-                Icon(imageVector = Icons.Default.Face, contentDescription = "Galería", modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("Galería", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Icon(imageVector = Icons.Default.Face, contentDescription = "Galería", modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Galería", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
             }
         }
 
@@ -1298,7 +1758,8 @@ fun ScannerOperationsPanel(
 fun VerificationProductForm(
     product: ProductEntity,
     onSave: (model: String, upc: String, size: String, color: String, qty: Int) -> Unit,
-    onCancel: () -> Unit
+    onCancel: () -> Unit,
+    onScanBarcodeClick: (((String) -> Unit) -> Unit)? = null
 ) {
     var modelVal by remember { mutableStateOf(product.model) }
     var upcVal by remember { mutableStateOf(product.upc) }
@@ -1352,7 +1813,22 @@ fun VerificationProductForm(
                 shape = RoundedCornerShape(12.dp),
                 colors = textFieldColors,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                singleLine = true
+                singleLine = true,
+                trailingIcon = if (onScanBarcodeClick != null) {
+                    {
+                        IconButton(onClick = {
+                            onScanBarcodeClick.invoke { scanned ->
+                                upcVal = scanned
+                            }
+                        }) {
+                            Icon(
+                                imageVector = BarcodeIcon,
+                                contentDescription = "Escanear barras",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                } else null
             )
 
             OutlinedTextField(
@@ -1806,11 +2282,13 @@ fun Modifier.wrapContentSize(align: Alignment): Modifier = this
 
 @Composable
 fun ManualFormDialog(
+    initialUpc: String = "",
     onDismiss: () -> Unit,
-    onConfirm: (model: String, upc: String, size: String, color: String, qty: Int) -> Unit
+    onConfirm: (model: String, upc: String, size: String, color: String, qty: Int) -> Unit,
+    onScanBarcodeClick: (((String) -> Unit) -> Unit)? = null
 ) {
     var m by remember { mutableStateOf("") }
-    var u by remember { mutableStateOf("") }
+    var u by remember(initialUpc) { mutableStateOf(initialUpc) }
     var s by remember { mutableStateOf("") }
     var c by remember { mutableStateOf("") }
     var q by remember { mutableStateOf(1) }
@@ -1852,7 +2330,22 @@ fun ManualFormDialog(
                     shape = RoundedCornerShape(12.dp),
                     colors = textFieldColors,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    singleLine = true
+                    singleLine = true,
+                    trailingIcon = if (onScanBarcodeClick != null) {
+                        {
+                            IconButton(onClick = {
+                                onScanBarcodeClick.invoke { scanned ->
+                                    u = scanned
+                                }
+                            }) {
+                                Icon(
+                                    imageVector = BarcodeIcon,
+                                    contentDescription = "Escanear barras",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                    } else null
                 )
 
                 OutlinedTextField(
@@ -2661,3 +3154,565 @@ fun BatchResultsReviewDialog(
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// FUNCIÓN: Recorte y compresión inteligente de imagen
+// Recorta la región central del bitmap (marco virtual) y comprime a JPEG 72%.
+// Objetivo: enviar imágenes ligeras (~80-150 KB) al modelo IA sin perder legibilidad.
+// ─────────────────────────────────────────────────────────────────────────────
+fun cropAndCompressBitmap(
+    source: Bitmap,
+    frameWidthFraction: Float = 0.82f,   // 82% del ancho = el área del marco
+    frameHeightFraction: Float = 0.48f,  // 48% del alto  = altura de la etiqueta
+    maxOutputWidthPx: Int = 800,         // máx 800px de ancho en la salida
+    jpegQuality: Int = 72                // 72% JPEG = buena legibilidad, archivo ligero
+): Bitmap {
+    // 1. Calcular coordenadas del recuadro central
+    val cropW = (source.width * frameWidthFraction).toInt()
+    val cropH = (source.height * frameHeightFraction).toInt()
+    val cropX = (source.width - cropW) / 2
+    val cropY = (source.height - cropH) / 2
+
+    // 2. Recortar
+    val cropped = Bitmap.createBitmap(source, cropX, cropY, cropW, cropH)
+
+    // 3. Escalar si supera el ancho máximo (mantiene relación de aspecto)
+    val scaled = if (cropped.width > maxOutputWidthPx) {
+        val scale = maxOutputWidthPx.toFloat() / cropped.width
+        val newH = (cropped.height * scale).toInt()
+        Bitmap.createScaledBitmap(cropped, maxOutputWidthPx, newH, true)
+    } else {
+        cropped
+    }
+
+    // 4. Comprimir a JPEG y decodificar de vuelta al Bitmap final
+    val stream = ByteArrayOutputStream()
+    scaled.compress(Bitmap.CompressFormat.JPEG, jpegQuality, stream)
+    val bytes = stream.toByteArray()
+    return android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: scaled
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// COMPOSABLE: CameraViewfinderScreen
+// Pantalla completa con preview de CameraX + marco de encuadre animado + flash.
+// Soporta escaneo OCR e importación de códigos de barras mediante Google ML Kit.
+// ─────────────────────────────────────────────────────────────────────────────
+@OptIn(ExperimentalPermissionsApi::class)
+@Composable
+fun CameraViewfinderScreen(
+    scanMode: CameraScanMode = CameraScanMode.OCR_LABEL,
+    onPhotoCaptured: (Bitmap) -> Unit,
+    onBarcodeCaptured: (String) -> Unit = {},
+    onClose: () -> Unit
+) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val cameraPermission = rememberPermissionState(android.Manifest.permission.CAMERA)
+
+    // CameraX use-cases
+    val preview = remember { Preview.Builder().build() }
+    val imageCapture = remember { ImageCapture.Builder()
+        .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+        .build()
+    }
+    val imageAnalysis = remember {
+        ImageAnalysis.Builder()
+            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+            .build()
+    }
+    
+    val executor = remember { Executors.newSingleThreadExecutor() }
+    var cameraControl by remember { mutableStateOf<androidx.camera.core.CameraControl?>(null) }
+    var isTorchOn by remember { mutableStateOf(false) }
+    var isCapturing by remember { mutableStateOf(false) }
+
+    // Animación del scanline dentro del marco
+    val infiniteTransition = rememberInfiniteTransition(label = "camScanline")
+    val scanlineY by infiniteTransition.animateFloat(
+        initialValue = 0.05f,
+        targetValue = 0.95f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2200, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "scanlineY"
+    )
+    val cornerPulse by infiniteTransition.animateFloat(
+        initialValue = 0.5f,
+        targetValue = 1.0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(900, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "cornerPulse"
+    )
+
+    // Solicitar permiso si no está concedido
+    LaunchedEffect(Unit) {
+        if (!cameraPermission.status.isGranted) {
+            cameraPermission.launchPermissionRequest()
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+    ) {
+        if (cameraPermission.status.isGranted) {
+            // ── PreviewView de CameraX ──────────────────────────────────────
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { ctx ->
+                    PreviewView(ctx).apply {
+                        implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+                        scaleType = PreviewView.ScaleType.FILL_CENTER
+                    }
+                },
+                update = { previewView ->
+                    val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
+                    cameraProviderFuture.addListener({
+                        val cameraProvider = cameraProviderFuture.get()
+                        preview.surfaceProvider = previewView.surfaceProvider
+
+                        if (scanMode == CameraScanMode.BARCODE_ONLY) {
+                            imageAnalysis.setAnalyzer(executor, object : ImageAnalysis.Analyzer {
+                                @OptIn(ExperimentalGetImage::class)
+                                override fun analyze(imageProxy: androidx.camera.core.ImageProxy) {
+                                    val mediaImage = imageProxy.image
+                                    if (mediaImage != null && !isCapturing) {
+                                        val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
+                                        val scanner = BarcodeScanning.getClient()
+                                        scanner.process(image)
+                                            .addOnSuccessListener { barcodes ->
+                                                if (barcodes.isNotEmpty() && !isCapturing) {
+                                                    val raw = barcodes.first().rawValue ?: ""
+                                                    if (raw.isNotEmpty()) {
+                                                        isCapturing = true // Evita lecturas duplicadas
+                                                        // Feedback háptico rápido
+                                                        try {
+                                                            val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                                                val vibratorManager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? android.os.VibratorManager
+                                                                vibratorManager?.defaultVibrator
+                                                            } else {
+                                                                @Suppress("DEPRECATION")
+                                                                context.getSystemService(Context.VIBRATOR_SERVICE) as? android.os.Vibrator
+                                                            }
+                                                            if (vibrator != null && vibrator.hasVibrator()) {
+                                                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                                                    vibrator.vibrate(android.os.VibrationEffect.createOneShot(150, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
+                                                                } else {
+                                                                    @Suppress("DEPRECATION")
+                                                                    vibrator.vibrate(150)
+                                                                }
+                                                            }
+                                                        } catch (e: Exception) {
+                                                            e.printStackTrace()
+                                                        }
+                                                        
+                                                        // Regresar el resultado al hilo principal de Compose
+                                                        ContextCompat.getMainExecutor(context).execute {
+                                                            onBarcodeCaptured(raw)
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            .addOnCompleteListener {
+                                                imageProxy.close()
+                                            }
+                                    } else {
+                                        imageProxy.close()
+                                    }
+                                }
+                            })
+                        }
+
+                        try {
+                            cameraProvider.unbindAll()
+                            if (scanMode == CameraScanMode.BARCODE_ONLY) {
+                                val camera = cameraProvider.bindToLifecycle(
+                                    lifecycleOwner,
+                                    CameraSelector.DEFAULT_BACK_CAMERA,
+                                    preview,
+                                    imageAnalysis
+                                )
+                                cameraControl = camera.cameraControl
+                            } else {
+                                val camera = cameraProvider.bindToLifecycle(
+                                    lifecycleOwner,
+                                    CameraSelector.DEFAULT_BACK_CAMERA,
+                                    preview,
+                                    imageCapture
+                                )
+                                cameraControl = camera.cameraControl
+                            }
+                        } catch (e: Exception) {
+                            Log.e("CameraX", "Error binding camera: ${e.message}")
+                        }
+                    }, ContextCompat.getMainExecutor(context))
+                }
+            )
+
+            // ── Overlay semitransparente con hueco rectangular (el marco) ──
+            val primaryColor = MaterialTheme.colorScheme.primary
+            val frameW = 0.82f   // fracción del ancho de pantalla
+            val frameH = if (scanMode == CameraScanMode.BARCODE_ONLY) 0.24f else 0.42f   // menor altura para códigos de barras
+
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .drawWithContent {
+                        drawContent()
+                        val fw = size.width * frameW
+                        val fh = size.height * frameH
+                        val fx = (size.width - fw) / 2f
+                        val fy = (size.height - fh) / 2f
+
+                        // Zona oscura alrededor (4 rectángulos)
+                        val overlayColor = Color.Black.copy(alpha = 0.62f)
+                        // Superior
+                        drawRect(overlayColor, topLeft = androidx.compose.ui.geometry.Offset(0f, 0f), size = Size(size.width, fy))
+                        // Inferior
+                        drawRect(overlayColor, topLeft = androidx.compose.ui.geometry.Offset(0f, fy + fh), size = Size(size.width, size.height - fy - fh))
+                        // Izquierda
+                        drawRect(overlayColor, topLeft = androidx.compose.ui.geometry.Offset(0f, fy), size = Size(fx, fh))
+                        // Derecha
+                        drawRect(overlayColor, topLeft = androidx.compose.ui.geometry.Offset(fx + fw, fy), size = Size(size.width - fx - fw, fh))
+
+                        // Borde del marco
+                        drawRoundRect(
+                            color = primaryColor.copy(alpha = 0.7f),
+                            topLeft = androidx.compose.ui.geometry.Offset(fx, fy),
+                            size = Size(fw, fh),
+                            cornerRadius = CornerRadius(12.dp.toPx()),
+                            style = Stroke(width = 1.5.dp.toPx())
+                        )
+
+                        // Esquinas L-shape animadas
+                        val cLen = 28.dp.toPx()
+                        val cStroke = 3.5.dp.toPx()
+                        val cColor = primaryColor.copy(alpha = cornerPulse)
+
+                        // Top-left
+                        drawLine(cColor, androidx.compose.ui.geometry.Offset(fx, fy), androidx.compose.ui.geometry.Offset(fx + cLen, fy), cStroke, StrokeCap.Round)
+                        drawLine(cColor, androidx.compose.ui.geometry.Offset(fx, fy), androidx.compose.ui.geometry.Offset(fx, fy + cLen), cStroke, StrokeCap.Round)
+                        // Top-right
+                        drawLine(cColor, androidx.compose.ui.geometry.Offset(fx + fw, fy), androidx.compose.ui.geometry.Offset(fx + fw - cLen, fy), cStroke, StrokeCap.Round)
+                        drawLine(cColor, androidx.compose.ui.geometry.Offset(fx + fw, fy), androidx.compose.ui.geometry.Offset(fx + fw, fy + cLen), cStroke, StrokeCap.Round)
+                        // Bottom-left
+                        drawLine(cColor, androidx.compose.ui.geometry.Offset(fx, fy + fh), androidx.compose.ui.geometry.Offset(fx + cLen, fy + fh), cStroke, StrokeCap.Round)
+                        drawLine(cColor, androidx.compose.ui.geometry.Offset(fx, fy + fh), androidx.compose.ui.geometry.Offset(fx, fy + fh - cLen), cStroke, StrokeCap.Round)
+                        // Bottom-right
+                        drawLine(cColor, androidx.compose.ui.geometry.Offset(fx + fw, fy + fh), androidx.compose.ui.geometry.Offset(fx + fw - cLen, fy + fh), cStroke, StrokeCap.Round)
+                        drawLine(cColor, androidx.compose.ui.geometry.Offset(fx + fw, fy + fh), androidx.compose.ui.geometry.Offset(fx + fw, fy + fh - cLen), cStroke, StrokeCap.Round)
+
+                        // Scanline animado dentro del marco
+                        val slY = fy + (fh * scanlineY)
+                        drawLine(
+                            color = primaryColor.copy(alpha = 0.85f),
+                            start = androidx.compose.ui.geometry.Offset(fx + 8.dp.toPx(), slY),
+                            end = androidx.compose.ui.geometry.Offset(fx + fw - 8.dp.toPx(), slY),
+                            strokeWidth = 2.dp.toPx()
+                        )
+                    }
+            ) {
+                // Hint dentro del marco
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(bottom = ((1f - (0.5f - frameH / 2f)) * 100).dp),
+                    contentAlignment = Alignment.Center
+                ) {}
+            }
+
+            // ── UI: toolbar superior ────────────────────────────────────────
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 48.dp)
+                    .align(Alignment.TopCenter),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Botón Flash
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(androidx.compose.foundation.shape.CircleShape)
+                        .background(Color.Black.copy(alpha = 0.55f))
+                        .border(1.dp, if (isTorchOn) Color(0xFFFFC107) else Color.White.copy(alpha = 0.3f), androidx.compose.foundation.shape.CircleShape)
+                        .clickable {
+                            isTorchOn = !isTorchOn
+                            cameraControl?.enableTorch(isTorchOn)
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = if (isTorchOn) "⚡" else "🔦",
+                        fontSize = 20.sp
+                    )
+                }
+
+                // Indicador de estado
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(Color.Black.copy(alpha = 0.55f))
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                ) {
+                    Text(
+                        text = if (scanMode == CameraScanMode.BARCODE_ONLY) "ESCANER BARRAS" else (if (isTorchOn) "FLASH ON" else "CÁMARA ACTIVA"),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        color = if (scanMode == CameraScanMode.BARCODE_ONLY) Color(0xFF38BDF8) else (if (isTorchOn) Color(0xFFFFC107) else Color(0xFF34D399))
+                    )
+                }
+
+                // Botón Cerrar
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(androidx.compose.foundation.shape.CircleShape)
+                        .background(Color.Black.copy(alpha = 0.55f))
+                        .border(1.dp, Color.White.copy(alpha = 0.3f), androidx.compose.foundation.shape.CircleShape)
+                        .clickable { onClose() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Clear,
+                        contentDescription = "Cerrar",
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
+            // ── Hint de texto centrado bajo el marco ───────────────────────
+            Column(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .padding(top = (frameH * 400 + 80).dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = if (scanMode == CameraScanMode.BARCODE_ONLY) "Centra el código de barras dentro del marco" else "Centra la etiqueta dentro del marco",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.White.copy(alpha = 0.85f),
+                    fontWeight = FontWeight.Medium,
+                    textAlign = TextAlign.Center
+                )
+            }
+
+            // ── Disparador o tarjeta de ayuda inferior ────────────────────
+            if (scanMode == CameraScanMode.OCR_LABEL) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 56.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(80.dp)
+                            .border(3.dp, Color.White.copy(alpha = 0.7f), androidx.compose.foundation.shape.CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(64.dp)
+                                .clip(androidx.compose.foundation.shape.CircleShape)
+                                .background(if (isCapturing) Color.Gray else Color.White)
+                                .clickable(enabled = !isCapturing) {
+                                    isCapturing = true
+                                    val outputFile = File(context.cacheDir, "camerax_label_${System.currentTimeMillis()}.jpg")
+                                    val outputOptions = ImageCapture.OutputFileOptions.Builder(outputFile).build()
+                                    imageCapture.takePicture(
+                                        outputOptions,
+                                        executor,
+                                        object : ImageCapture.OnImageSavedCallback {
+                                            override fun onImageSaved(output: ImageCapture.OutputFileResults) {
+                                                val bitmap = android.graphics.BitmapFactory.decodeFile(outputFile.absolutePath)
+                                                if (bitmap != null) {
+                                                    onPhotoCaptured(bitmap)
+                                                }
+                                            }
+                                            override fun onError(exception: ImageCaptureException) {
+                                                Log.e("CameraX", "Capture failed: ${exception.message}")
+                                                isCapturing = false
+                                            }
+                                        }
+                                    )
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (isCapturing) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(28.dp),
+                                    color = MaterialTheme.colorScheme.primary,
+                                    strokeWidth = 2.5.dp
+                                )
+                            }
+                        }
+                    }
+                }
+            } else {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 56.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color.Black.copy(alpha = 0.65f))
+                        .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(16.dp))
+                        .padding(horizontal = 24.dp, vertical = 12.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            color = primaryColor,
+                            strokeWidth = 2.5.dp
+                        )
+                        Text(
+                            text = "Buscando código de barras...",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
+                }
+            }
+        } else {
+            Column(
+                modifier = Modifier.align(Alignment.Center).padding(32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text("📷", fontSize = 48.sp)
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    "Se necesita acceso a la cámara",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "Concede el permiso de cámara para usar el visor.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.White.copy(alpha = 0.7f),
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(20.dp))
+                Button(onClick = { cameraPermission.launchPermissionRequest() }) {
+                    Text("Conceder permiso")
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = onClose,
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+                ) {
+                    Text("Cancelar")
+                }
+            }
+        }
+    }
+
+    // Liberar el executor al salir del composable
+    DisposableEffect(Unit) {
+        onDispose { executor.shutdown() }
+    }
+}
+
+@Composable
+fun ApiConfigDialog(
+    initialGemini: String,
+    initialGroq: String,
+    initialHf: String,
+    onDismiss: () -> Unit,
+    onSave: (gemini: String, groq: String, hf: String) -> Unit
+) {
+    var gemini by remember { mutableStateOf(initialGemini) }
+    var groq by remember { mutableStateOf(initialGroq) }
+    var hf by remember { mutableStateOf(initialHf) }
+
+    val textFieldColors = OutlinedTextFieldDefaults.colors(
+        focusedBorderColor = MaterialTheme.colorScheme.primary,
+        focusedLabelColor = MaterialTheme.colorScheme.primary,
+        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+        unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = "Configuración de API Keys",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+        },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = "Configura tus claves personales de API. Si se dejan vacías, la app usará las llaves por defecto del sistema.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+
+                OutlinedTextField(
+                    value = gemini,
+                    onValueChange = { gemini = it },
+                    label = { Text("Gemini API Key") },
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = textFieldColors,
+                    singleLine = true
+                )
+
+                OutlinedTextField(
+                    value = groq,
+                    onValueChange = { groq = it },
+                    label = { Text("Groq API Key") },
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = textFieldColors,
+                    singleLine = true
+                )
+
+                OutlinedTextField(
+                    value = hf,
+                    onValueChange = { hf = it },
+                    label = { Text("Hugging Face API Key") },
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = textFieldColors,
+                    singleLine = true
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    onSave(gemini.trim(), groq.trim(), hf.trim())
+                    onDismiss()
+                },
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+            ) {
+                Text("Guardar")
+            }
+        },
+        dismissButton = {
+            OutlinedButton(
+                onClick = onDismiss,
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant)
+            ) {
+                Text("Cancelar")
+            }
+        }
+    )
+}

@@ -45,63 +45,106 @@ object GeminiService {
         return Base64.encodeToString(outputStream.toByteArray(), Base64.NO_WRAP)
     }
 
-    suspend fun analyzeLabelImage(bitmap: Bitmap): OcrResult = withContext(Dispatchers.IO) {
-        val groqKey = BuildConfig.GROQ_API_KEY
-        if (groqKey.isNotEmpty() && groqKey != "MY_GROQ_API_KEY") {
-            try {
-                Log.d(TAG, "Routing to Groq API using Llama 4 Scout")
-                val base64Image = bitmap.toBase64()
-                return@withContext callOpenAiCompatibleApi(
-                    url = "https://api.groq.com/openai/v1/chat/completions",
-                    apiKey = groqKey,
-                    model = "meta-llama/llama-4-scout-17b-16e-instruct",
-                    base64Image = base64Image
-                )
-            } catch (e: Exception) {
-                Log.e(TAG, "Groq API analysis failed, falling back to other providers", e)
+    suspend fun analyzeLabelImage(
+        bitmap: Bitmap,
+        customGeminiKey: String? = null,
+        customGroqKey: String? = null,
+        customHfKey: String? = null,
+        selectedProvider: String = "auto"
+    ): OcrResult = withContext(Dispatchers.IO) {
+        val finalGroqKey = if (!customGroqKey.isNullOrEmpty()) customGroqKey else BuildConfig.GROQ_API_KEY
+        val finalHfKey = if (!customHfKey.isNullOrEmpty()) customHfKey else BuildConfig.HF_API_KEY
+        val finalGeminiKey = if (!customGeminiKey.isNullOrEmpty()) customGeminiKey else BuildConfig.GEMINI_API_KEY
+
+        val base64Image = bitmap.toBase64()
+
+        when (selectedProvider.lowercase()) {
+            "groq" -> {
+                if (finalGroqKey.isEmpty() || finalGroqKey == "MY_GROQ_API_KEY") {
+                    return@withContext OcrResult.Error("La clave de API de Groq no está configurada.")
+                }
+                try {
+                    return@withContext runGroq(base64Image, finalGroqKey)
+                } catch (e: Exception) {
+                    return@withContext OcrResult.Error("Groq Error: ${e.message}")
+                }
+            }
+            "hf" -> {
+                if (finalHfKey.isEmpty() || finalHfKey == "MY_HF_API_KEY") {
+                    return@withContext OcrResult.Error("La clave de API de Hugging Face no está configurada.")
+                }
+                try {
+                    return@withContext runHuggingFace(base64Image, finalHfKey)
+                } catch (e: Exception) {
+                    return@withContext OcrResult.Error("Hugging Face Error: ${e.message}")
+                }
+            }
+            "gemini" -> {
+                if (finalGeminiKey.isEmpty() || finalGeminiKey == "MY_GEMINI_API_KEY") {
+                    return@withContext OcrResult.Error("La clave de API de Gemini no está configurada.")
+                }
+                return@withContext runGemini(base64Image, finalGeminiKey)
+            }
+            else -> {
+                // Auto mode: sequentially try Groq, HF, Gemini
+                if (finalGroqKey.isNotEmpty() && finalGroqKey != "MY_GROQ_API_KEY") {
+                    try {
+                        return@withContext runGroq(base64Image, finalGroqKey)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Groq fallback failed, trying next", e)
+                    }
+                }
+                if (finalHfKey.isNotEmpty() && finalHfKey != "MY_HF_API_KEY") {
+                    try {
+                        return@withContext runHuggingFace(base64Image, finalHfKey)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "HF fallback failed, trying next", e)
+                    }
+                }
+                if (finalGeminiKey.isNotEmpty() && finalGeminiKey != "MY_GEMINI_API_KEY") {
+                    try {
+                        return@withContext runGemini(base64Image, finalGeminiKey)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Gemini fallback failed", e)
+                    }
+                }
+                return@withContext OcrResult.Error("No se encontraron claves de API válidas configuradas o todos los proveedores fallaron.")
             }
         }
+    }
 
-        val hfKey = BuildConfig.HF_API_KEY
-        if (hfKey.isNotEmpty() && hfKey != "MY_HF_API_KEY") {
-            try {
-                Log.d(TAG, "Routing to Hugging Face API using Qwen2-VL")
-                val base64Image = bitmap.toBase64()
-                return@withContext callOpenAiCompatibleApi(
-                    url = "https://api-inference.huggingface.co/models/Qwen/Qwen2-VL-7B-Instruct/v1/chat/completions",
-                    apiKey = hfKey,
-                    model = "Qwen/Qwen2-VL-7B-Instruct",
-                    base64Image = base64Image
-                )
-            } catch (e: Exception) {
-                Log.e(TAG, "Hugging Face API analysis failed, falling back to other providers", e)
-            }
-        }
+    private suspend fun runGroq(base64Image: String, apiKey: String): OcrResult {
+        Log.d(TAG, "Routing to Groq API using Llama 4 Scout")
+        return callOpenAiCompatibleApi(
+            url = "https://api.groq.com/openai/v1/chat/completions",
+            apiKey = apiKey,
+            model = "meta-llama/llama-4-scout-17b-16e-instruct",
+            base64Image = base64Image
+        )
+    }
 
-        val apiKey = BuildConfig.GEMINI_API_KEY
-        if (apiKey.isEmpty() || apiKey == "MY_GEMINI_API_KEY") {
-            return@withContext OcrResult.Error("API Key is missing or invalid. Please configure GEMINI_API_KEY in the Secrets Panel.")
-        }
+    private suspend fun runHuggingFace(base64Image: String, apiKey: String): OcrResult {
+        Log.d(TAG, "Routing to Hugging Face API using Qwen2-VL")
+        return callOpenAiCompatibleApi(
+            url = "https://api-inference.huggingface.co/models/Qwen/Qwen2-VL-7B-Instruct/v1/chat/completions",
+            apiKey = apiKey,
+            model = "Qwen/Qwen2-VL-7B-Instruct",
+            base64Image = base64Image
+        )
+    }
 
+    private suspend fun runGemini(base64Image: String, apiKey: String): OcrResult = withContext(Dispatchers.IO) {
         try {
-            // Convert bitmap to base64
-            val base64Image = bitmap.toBase64()
-
-            // Construct JSON request body using standard org.json classes
             val requestJson = JSONObject()
-            
-            // Contents
             val contentsArray = JSONArray()
             val contentObj = JSONObject()
             val partsArray = JSONArray()
 
-            // Prompt text part
             val textPart = JSONObject().apply {
                 put("text", "Perform OCR on this clothing/footwear label image. Extract the barcode UPC (merge any isolated first/last numbers if they are part of the UPC string), the product / style model identifier combined with its color/style code suffix (e.g., if model is 'M6PG34K3200' and color code is 'FBDB', you must return 'M6PG34K3200-FBDB' as the 'model'), and the size ('Tallas' e.g. '6 M', '9', 'L'). Return ONLY a JSON object matching the required schema.")
             }
             partsArray.put(textPart)
 
-            // Image part
             val inlineDataObj = JSONObject().apply {
                 put("mimeType", "image/jpeg")
                 put("data", base64Image)
@@ -115,7 +158,6 @@ object GeminiService {
             contentsArray.put(contentObj)
             requestJson.put("contents", contentsArray)
 
-            // System Instruction
             val systemInstructionObj = JSONObject().apply {
                 put("parts", JSONArray().apply {
                     put(JSONObject().apply {
@@ -125,12 +167,10 @@ object GeminiService {
             }
             requestJson.put("systemInstruction", systemInstructionObj)
 
-            // Generation Config
             val generationConfigJson = JSONObject().apply {
-                put("temperature", 0.15) // Low temperature for high precision/OCR tasks
-                put("responseMimeType", "application/json") // Response MimeType directly in generationConfig
+                put("temperature", 0.15)
+                put("responseMimeType", "application/json")
                 
-                // Response Schema specification for structured JSON output directly under generationConfig
                 val responseSchemaObj = JSONObject().apply {
                     put("type", "OBJECT")
                     val propertiesObj = JSONObject().apply {
@@ -154,7 +194,7 @@ object GeminiService {
                         put("size")
                     })
                 }
-                put("responseSchema", responseSchemaObj) // responseSchema directly in generationConfig
+                put("responseSchema", responseSchemaObj)
             }
             requestJson.put("generationConfig", generationConfigJson)
 
@@ -179,7 +219,6 @@ object GeminiService {
                     return@withContext OcrResult.Error("Empty response from Gemini API.")
                 }
 
-                // Parse the response
                 val rootJson = JSONObject(responseString)
                 val candidates = rootJson.optJSONArray("candidates")
                 if (candidates == null || candidates.length() == 0) {
@@ -199,7 +238,6 @@ object GeminiService {
 
                 Log.d(TAG, "Extracted parsed text: $text")
 
-                // Parse the inner JSON returned from the schema Format
                 val parsedObj = JSONObject(text.trim())
                 val upc = parsedObj.optString("upc", "").trim()
                 val model = parsedObj.optString("model", "").trim()
@@ -230,7 +268,6 @@ object GeminiService {
 
             val messagesArray = JSONArray()
 
-            // System instructions message
             val systemMessage = JSONObject().apply {
                 put("role", "system")
                 put("content", "You are an expert product label OCR extractor. Your only task is reading clothing/footwear tags and shoe box labels, and extracting structured data. You MUST return a JSON object with properties: 'upc', 'model', and 'size'.\n" +
@@ -322,16 +359,32 @@ object GeminiService {
         }
     }
 
-    fun getActiveProviderName(): String {
-        val groqKey = BuildConfig.GROQ_API_KEY
-        if (groqKey.isNotEmpty() && groqKey != "MY_GROQ_API_KEY") {
-            return "Groq (Llama 4 Scout)"
+    fun getActiveProviderName(
+        customGeminiKey: String? = null,
+        customGroqKey: String? = null,
+        customHfKey: String? = null,
+        selectedProvider: String = "auto"
+    ): String {
+        val finalGroqKey = if (!customGroqKey.isNullOrEmpty()) customGroqKey else BuildConfig.GROQ_API_KEY
+        val finalHfKey = if (!customHfKey.isNullOrEmpty()) customHfKey else BuildConfig.HF_API_KEY
+        val finalGeminiKey = if (!customGeminiKey.isNullOrEmpty()) customGeminiKey else BuildConfig.GEMINI_API_KEY
+
+        return when (selectedProvider.lowercase()) {
+            "groq" -> "Groq (Llama 4 Scout)"
+            "hf" -> "Hugging Face (Qwen2-VL)"
+            "gemini" -> "Gemini 2.5 Flash"
+            else -> {
+                if (finalGroqKey.isNotEmpty() && finalGroqKey != "MY_GROQ_API_KEY") {
+                    "Auto: Groq (Llama 4 Scout)"
+                } else if (finalHfKey.isNotEmpty() && finalHfKey != "MY_HF_API_KEY") {
+                    "Auto: HF (Qwen2-VL)"
+                } else if (finalGeminiKey.isNotEmpty() && finalGeminiKey != "MY_GEMINI_API_KEY") {
+                    "Auto: Gemini 2.5 Flash"
+                } else {
+                    "Ninguno (Sin Configurar)"
+                }
+            }
         }
-        val hfKey = BuildConfig.HF_API_KEY
-        if (hfKey.isNotEmpty() && hfKey != "MY_HF_API_KEY") {
-            return "Hugging Face (Qwen2-VL)"
-        }
-        return "Gemini 2.5 Flash"
     }
 }
 
