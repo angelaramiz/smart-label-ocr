@@ -14,8 +14,8 @@ android {
     applicationId = "com.aistudio.labelocr.vskrfe"
     minSdk = 24
     targetSdk = 36
-    versionCode = 1
-    versionName = "1.9.2"
+    versionCode = 3
+    versionName = "1.9.5"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -70,12 +70,12 @@ secrets {
 dependencies {
   implementation(platform(libs.androidx.compose.bom))
   implementation(platform(libs.firebase.bom))
-  // implementation(libs.accompanist.permissions)
+  implementation(libs.accompanist.permissions)
   implementation(libs.androidx.activity.compose)
-  // implementation(libs.androidx.camera.camera2)
-  // implementation(libs.androidx.camera.core)
-  // implementation(libs.androidx.camera.lifecycle)
-  // implementation(libs.androidx.camera.view)
+  implementation(libs.androidx.camera.camera2)
+  implementation(libs.androidx.camera.core)
+  implementation(libs.androidx.camera.lifecycle)
+  implementation(libs.androidx.camera.view)
   implementation(libs.androidx.compose.material.icons.core)
   // implementation(libs.androidx.compose.material.icons.extended)
   implementation(libs.androidx.compose.material3)
@@ -99,6 +99,7 @@ dependencies {
   implementation(libs.moshi.kotlin)
   implementation(libs.okhttp)
   // implementation(libs.play.services.location)
+  implementation(libs.play.services.barcodescanning)
   implementation(libs.retrofit)
   testImplementation(libs.androidx.compose.ui.test.junit4)
   testImplementation(libs.androidx.core)
