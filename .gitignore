@@ -21,3 +21,6 @@ build_apk.ps1
 *.jks
 notas/
 memoryagent/    
+AGENTS.md
+input.md
+tasks.md
