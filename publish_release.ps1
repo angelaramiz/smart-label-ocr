@@ -86,8 +86,17 @@ if (-not $SkipBuild) {
     .\gradlew.bat clean assembleRelease
 
     if ($LASTEXITCODE -ne 0) {
-        Write-Error "Error en la compilación Gradle. Proceso abortado."
-        exit 1
+        Write-Warning "La compilacion inicial fallo (posible archivo bloqueado). Deteniendo daemons de Gradle para liberar bloqueos..."
+        .\gradlew.bat --stop
+        Start-Sleep -Seconds 3
+        
+        Write-Host "Reintentando compilacion..." -ForegroundColor Yellow
+        .\gradlew.bat clean assembleRelease
+        
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Error persistente en la compilación Gradle. Proceso abortado."
+            exit 1
+        }
     }
 
     # Copiar APK a la raíz

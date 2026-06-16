@@ -66,6 +66,7 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Face
+import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -127,6 +128,7 @@ import com.example.data.database.ProductEntity
 import com.example.ui.MainViewModel
 import com.example.ui.MainViewModelFactory
 import com.example.ui.ScanState
+import com.example.ui.ContainersTabScreen
 import com.example.ui.theme.MyApplicationTheme
 import kotlinx.coroutines.launch
 import java.io.File
@@ -275,6 +277,7 @@ fun MainScreen(viewModel: MainViewModel, modifier: Modifier = Modifier) {
     val scanState by viewModel.scanState.collectAsState()
     val toastMessage by viewModel.toastMessage.collectAsState()
     val verificationProduct by viewModel.verificationProduct.collectAsState()
+    val totalTokens by viewModel.totalTokens.collectAsState()
 
     val isImporting by viewModel.isImporting.collectAsState()
     val importProgressText by viewModel.importProgressText.collectAsState()
@@ -289,7 +292,12 @@ fun MainScreen(viewModel: MainViewModel, modifier: Modifier = Modifier) {
     var showConfigDialog by remember { mutableStateOf(false) }
     var scanMode by remember { mutableStateOf(CameraScanMode.OCR_LABEL) }
     var onBarcodeScanResult by remember { mutableStateOf<((String) -> Unit)?>(null) }
-    var prefilledBarcodeForManualAdd by remember { mutableStateOf("") }
+    var manualFormModel by remember { mutableStateOf("") }
+    var manualFormUpc by remember { mutableStateOf("") }
+    var manualFormSize by remember { mutableStateOf("") }
+    var manualFormColor by remember { mutableStateOf("") }
+    var manualFormQty by remember { mutableStateOf(1) }
+    var hideManualDialogTemporarily by remember { mutableStateOf(false) }
 
     // Batch states from ViewModel
     val isBatchMode by viewModel.isBatchMode.collectAsState()
@@ -425,6 +433,8 @@ fun MainScreen(viewModel: MainViewModel, modifier: Modifier = Modifier) {
         // App Header Row
         HeaderBar(
             activeProviderName = activeProviderName,
+            totalTokens = totalTokens,
+            onResetTokens = { viewModel.resetTotalTokens() },
             onConfigClick = { showConfigDialog = true },
             onClearAll = { viewModel.clearAllInventory() },
             onCheckForUpdates = {
@@ -475,21 +485,15 @@ fun MainScreen(viewModel: MainViewModel, modifier: Modifier = Modifier) {
             targetState = currentTab,
             modifier = Modifier.fillMaxWidth().weight(1f),
             transitionSpec = {
-                if (targetState == "inventario") {
-                    (slideInHorizontally { width -> width } + fadeIn()).togetherWith(
-                        slideOutHorizontally { width -> -width } + fadeOut()
-                    )
-                } else {
-                    (slideInHorizontally { width -> -width } + fadeIn()).togetherWith(
-                        slideOutHorizontally { width -> width } + fadeOut()
-                    )
-                }
+                (fadeIn(animationSpec = tween(220, delayMillis = 90)) togetherWith
+                 fadeOut(animationSpec = tween(90)))
             },
             label = "tabTransition"
         ) { targetTab ->
-            if (targetTab == "escáner") {
-                // VIEWPORT 1: ESCÁNER INTELIGENTE (Smart Label OCR Scanner)
-                LazyColumn(
+            when (targetTab) {
+                "escáner" -> {
+                    // VIEWPORT 1: ESCÁNER INTELIGENTE (Smart Label OCR Scanner)
+                    LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
@@ -681,7 +685,7 @@ fun MainScreen(viewModel: MainViewModel, modifier: Modifier = Modifier) {
                                             },
                                             onNotFound = {
                                                 Toast.makeText(context, "Código $barcode no encontrado. Ingrese los detalles manualmente.", Toast.LENGTH_LONG).show()
-                                                prefilledBarcodeForManualAdd = barcode
+                                                manualFormUpc = barcode
                                                 showManualAddDialog = true
                                             }
                                         )
@@ -837,7 +841,7 @@ fun MainScreen(viewModel: MainViewModel, modifier: Modifier = Modifier) {
                                             },
                                             onNotFound = {
                                                 Toast.makeText(context, "Código $barcode no encontrado. Ingrese los detalles manualmente.", Toast.LENGTH_LONG).show()
-                                                prefilledBarcodeForManualAdd = barcode
+                                                manualFormUpc = barcode
                                                 showManualAddDialog = true
                                             }
                                         )
@@ -872,9 +876,10 @@ fun MainScreen(viewModel: MainViewModel, modifier: Modifier = Modifier) {
                         }
                     }
                 }
-            } else {
-                // VIEWPORT 2: TABLA INVENTARIO (Excel-styled spreadsheets grouped by model)
-                Column(
+                }
+                "inventario" -> {
+                    // VIEWPORT 2: TABLA INVENTARIO (Excel-styled spreadsheets grouped by model)
+                    Column(
                     modifier = Modifier.fillMaxSize()
                 ) {
                     // Filter Bar
@@ -1008,27 +1013,53 @@ fun MainScreen(viewModel: MainViewModel, modifier: Modifier = Modifier) {
                     }
                 }
             }
+            "contenedor" -> {
+                    ContainersTabScreen(
+                        viewModel = viewModel,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+            }
         }
     }
 
     // Manual Entry Dialog pop-up
-    if (showManualAddDialog) {
+    if (showManualAddDialog && !hideManualDialogTemporarily) {
         ManualFormDialog(
-            initialUpc = prefilledBarcodeForManualAdd,
-            onDismiss = { 
+            model = manualFormModel,
+            onModelChange = { manualFormModel = it },
+            upc = manualFormUpc,
+            onUpcChange = { manualFormUpc = it },
+            size = manualFormSize,
+            onSizeChange = { manualFormSize = it },
+            color = manualFormColor,
+            onColorChange = { manualFormColor = it },
+            qty = manualFormQty,
+            onQtyChange = { manualFormQty = it },
+            onDismiss = {
                 showManualAddDialog = false
-                prefilledBarcodeForManualAdd = ""
+                manualFormModel = ""
+                manualFormUpc = ""
+                manualFormSize = ""
+                manualFormColor = ""
+                manualFormQty = 1
             },
-            onConfirm = { m, u, s, c, q ->
-                viewModel.commitProduct(u, m, s, c, q)
+            onConfirm = {
+                viewModel.commitProduct(manualFormUpc, manualFormModel, manualFormSize, manualFormColor, manualFormQty)
                 showManualAddDialog = false
-                prefilledBarcodeForManualAdd = ""
+                manualFormModel = ""
+                manualFormUpc = ""
+                manualFormSize = ""
+                manualFormColor = ""
+                manualFormQty = 1
             },
-            onScanBarcodeClick = { callback ->
+            onScanBarcodeClick = {
                 scanMode = CameraScanMode.BARCODE_ONLY
                 onBarcodeScanResult = { barcode ->
-                    callback(barcode)
+                    manualFormUpc = barcode
+                    hideManualDialogTemporarily = false
                 }
+                hideManualDialogTemporarily = true
                 showCameraViewfinder = true
             }
         )
@@ -1203,6 +1234,8 @@ fun MainScreen(viewModel: MainViewModel, modifier: Modifier = Modifier) {
 @Composable
 fun HeaderBar(
     activeProviderName: String,
+    totalTokens: Int,
+    onResetTokens: () -> Unit,
     onConfigClick: () -> Unit,
     onClearAll: () -> Unit,
     onCheckForUpdates: () -> Unit
@@ -1276,64 +1309,110 @@ fun HeaderBar(
             }
         }
 
-        Box {
-            IconButton(
-                onClick = { menuExpanded = true },
-                modifier = Modifier.size(40.dp)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            // Token counter chip
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f))
+                    .clickable { onResetTokens() }
+                    .padding(horizontal = 8.dp, vertical = 6.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Default.MoreVert,
-                    contentDescription = "Opciones",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(22.dp)
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = "Tokens: $totalTokens",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = "Restablecer",
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f),
+                        modifier = Modifier.size(12.dp)
+                    )
+                }
             }
-            DropdownMenu(
-                expanded = menuExpanded,
-                onDismissRequest = { menuExpanded = false }
-            ) {
-                DropdownMenuItem(
-                    text = { Text("Configuración de API") },
-                    onClick = {
-                        menuExpanded = false
-                        onConfigClick()
-                    },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Default.Info,
-                            contentDescription = "Configuración",
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                )
-                DropdownMenuItem(
-                    text = { Text("Comprobar actualización") },
-                    onClick = {
-                        menuExpanded = false
-                        onCheckForUpdates()
-                    },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Default.Refresh,
-                            contentDescription = "Actualizar",
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                )
-                DropdownMenuItem(
-                    text = { Text("Restablecer inventario") },
-                    onClick = {
-                        menuExpanded = false
-                        showConfirmClear = true
-                    },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Default.Delete,
-                            contentDescription = "Limpiar",
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                )
+
+            Box {
+                IconButton(
+                    onClick = { menuExpanded = true },
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.MoreVert,
+                        contentDescription = "Opciones",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+                DropdownMenu(
+                    expanded = menuExpanded,
+                    onDismissRequest = { menuExpanded = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Configuración de API") },
+                        onClick = {
+                            menuExpanded = false
+                            onConfigClick()
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Default.Info,
+                                contentDescription = "Configuración",
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Comprobar actualización") },
+                        onClick = {
+                            menuExpanded = false
+                            onCheckForUpdates()
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "Actualizar",
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Restablecer tokens ($totalTokens)") },
+                        onClick = {
+                            menuExpanded = false
+                            onResetTokens()
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "Restablecer tokens",
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Restablecer inventario") },
+                        onClick = {
+                            menuExpanded = false
+                            showConfirmClear = true
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Default.Delete,
+                                contentDescription = "Limpiar",
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    )
+                }
             }
         }
     }
@@ -1375,6 +1454,7 @@ fun SegmentedTabBar(currentTab: String, onTabSelected: (String) -> Unit) {
     ) {
         val scannerActive = currentTab == "escáner"
         val inventoryActive = currentTab == "inventario"
+        val containerActive = currentTab == "contenedor"
 
         val scannerBg by androidx.compose.animation.animateColorAsState(
             targetValue = if (scannerActive) MaterialTheme.colorScheme.primary else Color.Transparent,
@@ -1402,10 +1482,12 @@ fun SegmentedTabBar(currentTab: String, onTabSelected: (String) -> Unit) {
             )
             Spacer(modifier = Modifier.width(8.dp))
             Text(
-                text = "Escanear Etiquetas",
+                text = "Escanear",
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold,
-                color = scannerContent
+                color = scannerContent,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
 
@@ -1435,10 +1517,47 @@ fun SegmentedTabBar(currentTab: String, onTabSelected: (String) -> Unit) {
             )
             Spacer(modifier = Modifier.width(8.dp))
             Text(
-                text = "Tabla Excel (BD)",
+                text = "Inventario",
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold,
-                color = inventoryContent
+                color = inventoryContent,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+
+        val containerBg by androidx.compose.animation.animateColorAsState(
+            targetValue = if (containerActive) MaterialTheme.colorScheme.primary else Color.Transparent,
+            label = "containerBg"
+        )
+        val containerContent by androidx.compose.animation.animateColorAsState(
+            targetValue = if (containerActive) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+            label = "containerContent"
+        )
+
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .clip(RoundedCornerShape(10.dp))
+                .background(containerBg)
+                .clickable { onTabSelected("contenedor") }
+                .padding(vertical = 12.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.ShoppingCart,
+                contentDescription = "Contenedores",
+                tint = containerContent
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Contenedores",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = containerContent,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }
@@ -2282,17 +2401,20 @@ fun Modifier.wrapContentSize(align: Alignment): Modifier = this
 
 @Composable
 fun ManualFormDialog(
-    initialUpc: String = "",
+    model: String,
+    onModelChange: (String) -> Unit,
+    upc: String,
+    onUpcChange: (String) -> Unit,
+    size: String,
+    onSizeChange: (String) -> Unit,
+    color: String,
+    onColorChange: (String) -> Unit,
+    qty: Int,
+    onQtyChange: (Int) -> Unit,
     onDismiss: () -> Unit,
-    onConfirm: (model: String, upc: String, size: String, color: String, qty: Int) -> Unit,
-    onScanBarcodeClick: (((String) -> Unit) -> Unit)? = null
+    onConfirm: () -> Unit,
+    onScanBarcodeClick: (() -> Unit)? = null
 ) {
-    var m by remember { mutableStateOf("") }
-    var u by remember(initialUpc) { mutableStateOf(initialUpc) }
-    var s by remember { mutableStateOf("") }
-    var c by remember { mutableStateOf("") }
-    var q by remember { mutableStateOf(1) }
-
     val textFieldColors = OutlinedTextFieldDefaults.colors(
         focusedBorderColor = MaterialTheme.colorScheme.primary,
         focusedLabelColor = MaterialTheme.colorScheme.primary,
@@ -2313,8 +2435,8 @@ fun ManualFormDialog(
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
                 OutlinedTextField(
-                    value = m,
-                    onValueChange = { m = it },
+                    value = model,
+                    onValueChange = onModelChange,
                     label = { Text("Modelo (Model)") },
                     modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
                     shape = RoundedCornerShape(12.dp),
@@ -2323,8 +2445,8 @@ fun ManualFormDialog(
                 )
 
                 OutlinedTextField(
-                    value = u,
-                    onValueChange = { u = it },
+                    value = upc,
+                    onValueChange = onUpcChange,
                     label = { Text("Código de Barras (UPC)") },
                     modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
                     shape = RoundedCornerShape(12.dp),
@@ -2333,11 +2455,7 @@ fun ManualFormDialog(
                     singleLine = true,
                     trailingIcon = if (onScanBarcodeClick != null) {
                         {
-                            IconButton(onClick = {
-                                onScanBarcodeClick.invoke { scanned ->
-                                    u = scanned
-                                }
-                            }) {
+                            IconButton(onClick = onScanBarcodeClick) {
                                 Icon(
                                     imageVector = BarcodeIcon,
                                     contentDescription = "Escanear barras",
@@ -2349,9 +2467,19 @@ fun ManualFormDialog(
                 )
 
                 OutlinedTextField(
-                    value = s,
-                    onValueChange = { s = it },
+                    value = size,
+                    onValueChange = onSizeChange,
                     label = { Text("Talla") },
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = textFieldColors,
+                    singleLine = true
+                )
+
+                OutlinedTextField(
+                    value = color,
+                    onValueChange = onColorChange,
+                    label = { Text("Color") },
                     modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
                     shape = RoundedCornerShape(12.dp),
                     colors = textFieldColors,
@@ -2375,16 +2503,16 @@ fun ManualFormDialog(
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(onClick = { if (q > 1) q-- }) {
+                        IconButton(onClick = { if (qty > 1) onQtyChange(qty - 1) }) {
                             Text("-", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                         }
                         Text(
-                            text = q.toString(),
+                            text = qty.toString(),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary
                         )
-                        IconButton(onClick = { q++ }) {
+                        IconButton(onClick = { onQtyChange(qty + 1) }) {
                             Text("+", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                         }
                     }
@@ -2394,8 +2522,8 @@ fun ManualFormDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    if (m.isNotEmpty() && u.isNotEmpty() && s.isNotEmpty()) {
-                        onConfirm(m, u, s, c, q)
+                    if (model.isNotEmpty() && upc.isNotEmpty() && size.isNotEmpty()) {
+                        onConfirm()
                     }
                 },
                 shape = RoundedCornerShape(12.dp),
@@ -3224,6 +3352,7 @@ fun CameraViewfinderScreen(
     var cameraControl by remember { mutableStateOf<androidx.camera.core.CameraControl?>(null) }
     var isTorchOn by remember { mutableStateOf(false) }
     var isCapturing by remember { mutableStateOf(false) }
+    var activeCameraProvider by remember { mutableStateOf<ProcessCameraProvider?>(null) }
 
     // Animación del scanline dentro del marco
     val infiniteTransition = rememberInfiniteTransition(label = "camScanline")
@@ -3272,6 +3401,7 @@ fun CameraViewfinderScreen(
                     val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
                     cameraProviderFuture.addListener({
                         val cameraProvider = cameraProviderFuture.get()
+                        activeCameraProvider = cameraProvider
                         preview.surfaceProvider = previewView.surfaceProvider
 
                         if (scanMode == CameraScanMode.BARCODE_ONLY) {
@@ -3618,9 +3748,28 @@ fun CameraViewfinderScreen(
         }
     }
 
-    // Liberar el executor al salir del composable
-    DisposableEffect(Unit) {
-        onDispose { executor.shutdown() }
+    // Liberar el executor y desvincular cámara/apagar flash al salir del composable
+    DisposableEffect(context) {
+        onDispose {
+            executor.shutdown()
+            try {
+                activeCameraProvider?.unbindAll()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+            try {
+                val providerFuture = ProcessCameraProvider.getInstance(context)
+                providerFuture.addListener({
+                    try {
+                        providerFuture.get().unbindAll()
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }, ContextCompat.getMainExecutor(context))
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 }
 

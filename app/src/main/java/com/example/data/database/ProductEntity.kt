@@ -11,5 +11,6 @@ data class ProductEntity(
     val size: String,
     val color: String,
     val quantity: Int,
+    val containerSku: String? = null,
     val timestamp: Long = System.currentTimeMillis()
 )

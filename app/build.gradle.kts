@@ -14,8 +14,8 @@ android {
     applicationId = "com.aistudio.labelocr.vskrfe"
     minSdk = 24
     targetSdk = 36
-    versionCode = 4
-    versionName = "1.9.6"
+    versionCode = 7
+    versionName = "1.9.8"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }

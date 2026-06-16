@@ -1,5 +1,6 @@
 package com.example.data.repository
 
+import com.example.data.database.ContainerEntity
 import com.example.data.database.ProductDao
 import com.example.data.database.ProductEntity
 import kotlinx.coroutines.flow.Flow
@@ -7,6 +8,24 @@ import kotlinx.coroutines.flow.Flow
 class ProductRepository(private val productDao: ProductDao) {
 
     val allProducts: Flow<List<ProductEntity>> = productDao.getAllProducts()
+    val allContainers: Flow<List<ContainerEntity>> = productDao.getAllContainers()
+
+    suspend fun insertContainer(container: ContainerEntity) {
+        productDao.insertContainer(container)
+    }
+
+    suspend fun deleteContainer(sku: String) {
+        productDao.clearProductsFromContainer(sku)
+        productDao.deleteContainer(sku)
+    }
+
+    fun getProductsInContainer(containerSku: String): Flow<List<ProductEntity>> {
+        return productDao.getProductsInContainer(containerSku)
+    }
+
+    suspend fun associateProductWithContainer(productId: Int, containerSku: String?) {
+        productDao.associateProductWithContainer(productId, containerSku)
+    }
 
     suspend fun addOrIncrementProduct(upc: String, model: String, size: String, color: String, quantity: Int = 1): AddResult {
         val cleanedModel = model.trim().uppercase()

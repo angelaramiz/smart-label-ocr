@@ -220,20 +220,23 @@ object GeminiService {
                 }
 
                 val rootJson = JSONObject(responseString)
+                val usageMetadata = rootJson.optJSONObject("usageMetadata")
+                val tokensUsed = usageMetadata?.optInt("totalTokenCount", 0) ?: 0
+
                 val candidates = rootJson.optJSONArray("candidates")
                 if (candidates == null || candidates.length() == 0) {
-                    return@withContext OcrResult.Error("No candidates returned from Gemini.")
+                    return@withContext OcrResult.Error("No candidates returned from Gemini.", tokensUsed = tokensUsed)
                 }
 
                 val content = candidates.getJSONObject(0).optJSONObject("content")
                 val parts = content?.optJSONArray("parts")
                 if (parts == null || parts.length() == 0) {
-                    return@withContext OcrResult.Error("Incomplete response content.")
+                    return@withContext OcrResult.Error("Incomplete response content.", tokensUsed = tokensUsed)
                 }
 
                 val text = parts.getJSONObject(0).optString("text")
                 if (text.isNullOrEmpty()) {
-                    return@withContext OcrResult.Error("Could not extract text from label.")
+                    return@withContext OcrResult.Error("Could not extract text from label.", tokensUsed = tokensUsed)
                 }
 
                 Log.d(TAG, "Extracted parsed text: $text")
@@ -245,10 +248,10 @@ object GeminiService {
                 val color = parsedObj.optString("color", "").trim()
 
                 if (upc.isEmpty() || model.isEmpty() || size.isEmpty()) {
-                    return@withContext OcrResult.Error("Could not read essential info. Found UPC: $upc, Model: $model, Size: $size. Please ensure photo is well lit and cropped.")
+                    return@withContext OcrResult.Error("Could not read essential info. Found UPC: $upc, Model: $model, Size: $size. Please ensure photo is well lit and cropped.", tokensUsed = tokensUsed)
                 }
 
-                OcrResult.Success(upc, model, size, color)
+                OcrResult.Success(upc, model, size, color, tokensUsed = tokensUsed)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Exception during analysis", e)
@@ -328,15 +331,18 @@ object GeminiService {
                 }
 
                 val rootJson = JSONObject(responseString)
+                val usageObj = rootJson.optJSONObject("usage")
+                val tokensUsed = usageObj?.optInt("total_tokens", 0) ?: 0
+
                 val choices = rootJson.optJSONArray("choices")
                 if (choices == null || choices.length() == 0) {
-                    return@withContext OcrResult.Error("No choices returned from API.")
+                    return@withContext OcrResult.Error("No choices returned from API.", tokensUsed = tokensUsed)
                 }
 
                 val message = choices.getJSONObject(0).optJSONObject("message")
                 val text = message?.optString("content", "")
                 if (text.isNullOrEmpty()) {
-                    return@withContext OcrResult.Error("Could not extract text from API response.")
+                    return@withContext OcrResult.Error("Could not extract text from API response.", tokensUsed = tokensUsed)
                 }
 
                 Log.d(TAG, "Extracted parsed content: $text")
@@ -348,10 +354,10 @@ object GeminiService {
                 val color = parsedObj.optString("color", "").trim()
 
                 if (upc.isEmpty() || model.isEmpty() || size.isEmpty()) {
-                    return@withContext OcrResult.Error("Could not read essential info. Found UPC: $upc, Model: $model, Size: $size. Please ensure photo is well lit and cropped.")
+                    return@withContext OcrResult.Error("Could not read essential info. Found UPC: $upc, Model: $model, Size: $size. Please ensure photo is well lit and cropped.", tokensUsed = tokensUsed)
                 }
 
-                OcrResult.Success(upc, model, size, color)
+                OcrResult.Success(upc, model, size, color, tokensUsed = tokensUsed)
             }
         } catch (e: Exception) {
             Log.e(TAG, "OpenAI-compatible API Exception", e)
@@ -389,6 +395,6 @@ object GeminiService {
 }
 
 sealed class OcrResult {
-    data class Success(val upc: String, val model: String, val size: String, val color: String) : OcrResult()
-    data class Error(val message: String, val errorCode: Int = 0) : OcrResult()
+    data class Success(val upc: String, val model: String, val size: String, val color: String, val tokensUsed: Int = 0) : OcrResult()
+    data class Error(val message: String, val errorCode: Int = 0, val tokensUsed: Int = 0) : OcrResult()
 }

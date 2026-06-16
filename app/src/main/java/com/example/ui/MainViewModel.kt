@@ -1,10 +1,12 @@
 package com.example.ui
 
+import android.util.Log
 import android.graphics.Bitmap
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.database.ProductEntity
+import com.example.data.database.ContainerEntity
 import com.example.data.network.GeminiService
 import com.example.data.network.OcrResult
 import com.example.data.repository.AddResult
@@ -12,9 +14,17 @@ import com.example.data.repository.ProductRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 sealed class ScanState {
     object Idle : ScanState()
@@ -44,6 +54,70 @@ data class BatchItem(
 class MainViewModel(private val repository: ProductRepository, private val context: Context) : ViewModel() {
 
     private val prefs = context.getSharedPreferences("label_scan_prefs", Context.MODE_PRIVATE)
+
+    // Token Tracker States
+    private val _totalTokens = MutableStateFlow(prefs.getInt("total_tokens", 0))
+    val totalTokens: StateFlow<Int> = _totalTokens.asStateFlow()
+
+    private val _lastScanTokens = MutableStateFlow(0)
+    val lastScanTokens: StateFlow<Int> = _lastScanTokens.asStateFlow()
+
+    fun resetTotalTokens() {
+        prefs.edit().putInt("total_tokens", 0).apply()
+        _totalTokens.value = 0
+        _lastScanTokens.value = 0
+        _toastMessage.value = "Contador de tokens reiniciado"
+    }
+
+    // Containers list StateFlow
+    val containersList: StateFlow<List<ContainerEntity>> = repository.allContainers
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
+    fun createContainer(name: String) {
+        viewModelScope.launch {
+            try {
+                val sku = "CONT-${SimpleDateFormat("yyyyMMdd-HHmmss", Locale.getDefault()).format(Date())}"
+                repository.insertContainer(ContainerEntity(sku = sku, name = name))
+                _toastMessage.value = "Contenedor '$name' creado con éxito."
+            } catch (e: Exception) {
+                _toastMessage.value = "Error al crear contenedor: ${e.message}"
+            }
+        }
+    }
+
+    fun deleteContainer(sku: String) {
+        viewModelScope.launch {
+            try {
+                repository.deleteContainer(sku)
+                _toastMessage.value = "Contenedor eliminado y productos desvinculados."
+            } catch (e: Exception) {
+                _toastMessage.value = "Error al eliminar contenedor: ${e.message}"
+            }
+        }
+    }
+
+    fun associateProductWithContainer(productId: Int, containerSku: String?) {
+        viewModelScope.launch {
+            try {
+                repository.associateProductWithContainer(productId, containerSku)
+                if (containerSku != null) {
+                    _toastMessage.value = "Producto asignado al contenedor."
+                } else {
+                    _toastMessage.value = "Producto removido del contenedor."
+                }
+            } catch (e: Exception) {
+                _toastMessage.value = "Error al asociar producto: ${e.message}"
+            }
+        }
+    }
+
+    fun getProductsInContainer(containerSku: String): Flow<List<ProductEntity>> {
+        return repository.getProductsInContainer(containerSku)
+    }
 
     private val _customGeminiKey = MutableStateFlow(prefs.getString("gemini_key", "") ?: "")
     val customGeminiKey = _customGeminiKey.asStateFlow()
@@ -334,6 +408,13 @@ class MainViewModel(private val repository: ProductRepository, private val conte
                 selectedProvider = _selectedProvider.value
             )) {
                 is OcrResult.Success -> {
+                    val tokens = result.tokensUsed
+                    if (tokens > 0) {
+                        val newTotal = _totalTokens.value + tokens
+                        prefs.edit().putInt("total_tokens", newTotal).apply()
+                        _totalTokens.value = newTotal
+                        _lastScanTokens.value = tokens
+                    }
                     _batchQueue.value = _batchQueue.value.map {
                         if (it.id == id) {
                             it.copy(
@@ -349,6 +430,13 @@ class MainViewModel(private val repository: ProductRepository, private val conte
                     }
                 }
                 is OcrResult.Error -> {
+                    val tokens = result.tokensUsed
+                    if (tokens > 0) {
+                        val newTotal = _totalTokens.value + tokens
+                        prefs.edit().putInt("total_tokens", newTotal).apply()
+                        _totalTokens.value = newTotal
+                        _lastScanTokens.value = tokens
+                    }
                     _batchQueue.value = _batchQueue.value.map {
                         if (it.id == id) {
                             it.copy(
@@ -407,6 +495,17 @@ class MainViewModel(private val repository: ProductRepository, private val conte
                         selectedProvider = _selectedProvider.value
                     )
                     finalResult = result
+                    
+                    val tokens = when (result) {
+                        is OcrResult.Success -> result.tokensUsed
+                        is OcrResult.Error -> result.tokensUsed
+                    }
+                    if (tokens > 0) {
+                        val newTotal = _totalTokens.value + tokens
+                        prefs.edit().putInt("total_tokens", newTotal).apply()
+                        _totalTokens.value = newTotal
+                        _lastScanTokens.value = tokens
+                    }
                     
                     if (result is OcrResult.Success) {
                         success = true
@@ -529,6 +628,14 @@ class MainViewModel(private val repository: ProductRepository, private val conte
                 selectedProvider = _selectedProvider.value
             )) {
                 is OcrResult.Success -> {
+                    val tokens = result.tokensUsed
+                    if (tokens > 0) {
+                        val newTotal = _totalTokens.value + tokens
+                        prefs.edit().putInt("total_tokens", newTotal).apply()
+                        _totalTokens.value = newTotal
+                        _lastScanTokens.value = tokens
+                        _toastMessage.value = "Tokens usados en escaneo: $tokens"
+                    }
                     _scanState.value = ScanState.Success(
                         upc = result.upc,
                         model = result.model,
@@ -545,6 +652,16 @@ class MainViewModel(private val repository: ProductRepository, private val conte
                     )
                 }
                 is OcrResult.Error -> {
+                    val tokens = result.tokensUsed
+                    if (tokens > 0) {
+                        val newTotal = _totalTokens.value + tokens
+                        prefs.edit().putInt("total_tokens", newTotal).apply()
+                        _totalTokens.value = newTotal
+                        _lastScanTokens.value = tokens
+                        _toastMessage.value = "Error (Tokens: $tokens): ${result.message}"
+                    } else {
+                        _toastMessage.value = result.message
+                    }
                     _scanState.value = ScanState.Error(result.message)
                 }
             }
@@ -617,5 +734,224 @@ class MainViewModel(private val repository: ProductRepository, private val conte
             }
         }
         return sb.toString()
+    }
+
+    fun generateContainersPdfReport(context: Context, onFinished: (File?) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val containers = containersList.value
+                val pdfDocument = android.graphics.pdf.PdfDocument()
+                
+                // Tabloid size in points: 11" x 17" -> 792 x 1224
+                val pageInfo = android.graphics.pdf.PdfDocument.PageInfo.Builder(792, 1224, 1).create()
+                var page = pdfDocument.startPage(pageInfo)
+                var canvas = page.canvas
+                
+                val paint = android.graphics.Paint()
+                val textPaint = android.graphics.Paint().apply {
+                    color = android.graphics.Color.BLACK
+                    textSize = 12f
+                    isAntiAlias = true
+                }
+                val titlePaint = android.graphics.Paint().apply {
+                    color = android.graphics.Color.BLACK
+                    textSize = 20f
+                    isFakeBoldText = true
+                    isAntiAlias = true
+                }
+                val headerPaint = android.graphics.Paint().apply {
+                    color = android.graphics.Color.rgb(0, 128, 128) // Teal
+                    textSize = 14f
+                    isFakeBoldText = true
+                    isAntiAlias = true
+                }
+                
+                var currentY = 50f
+                val marginX = 40f
+                val contentWidth = 792f - (marginX * 2) // 712f
+                
+                // Draw title
+                canvas.drawText("REPORTE DE CONTENEDORES Y PRODUCTOS", marginX, currentY, titlePaint)
+                currentY += 15f
+                
+                val dateStr = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date())
+                textPaint.textSize = 10f
+                canvas.drawText("Generado el: $dateStr", marginX, currentY, textPaint)
+                currentY += 35f
+                
+                if (containers.isEmpty()) {
+                    textPaint.textSize = 12f
+                    canvas.drawText("No hay contenedores registrados.", marginX, currentY, textPaint)
+                } else {
+                    for (container in containers) {
+                        // Check if we need to start a new page
+                        if (currentY > 1050f) {
+                            pdfDocument.finishPage(page)
+                            page = pdfDocument.startPage(pageInfo)
+                            canvas = page.canvas
+                            currentY = 50f
+                        }
+                        
+                        // Draw Container Header Box
+                        paint.color = android.graphics.Color.rgb(230, 242, 242) // Very light teal
+                        paint.style = android.graphics.Paint.Style.FILL
+                        canvas.drawRect(marginX, currentY, marginX + contentWidth, currentY + 60f, paint)
+                        
+                        paint.color = android.graphics.Color.rgb(0, 128, 128) // Teal border
+                        paint.style = android.graphics.Paint.Style.STROKE
+                        paint.strokeWidth = 1.5f
+                        canvas.drawRect(marginX, currentY, marginX + contentWidth, currentY + 60f, paint)
+                        
+                        // Text inside header
+                        canvas.drawText("Contenedor: ${container.name}", marginX + 15f, currentY + 25f, headerPaint)
+                        
+                        // Draw SKU Text
+                        textPaint.textSize = 10f
+                        textPaint.isFakeBoldText = true
+                        canvas.drawText("SKU: ${container.sku}", marginX + 15f, currentY + 45f, textPaint)
+                        
+                        // Render Code 128 Barcode inside the Header Box
+                        val barcodeX = marginX + contentWidth - 250f
+                        val barcodeY = currentY + 10f
+                        val barcodeHeight = 35f
+                        drawCode128Barcode(canvas, container.sku, barcodeX, barcodeY, barcodeHeight)
+                        
+                        currentY += 75f
+                        
+                        // Fetch products for this container from DB
+                        val products = repository.getProductsInContainer(container.sku).first()
+                        
+                        if (products.isEmpty()) {
+                            textPaint.textSize = 11f
+                            textPaint.isFakeBoldText = false
+                            canvas.drawText("  (No hay productos asociados en este contenedor)", marginX + 15f, currentY, textPaint)
+                            currentY += 25f
+                        } else {
+                            // Draw table headers
+                            paint.color = android.graphics.Color.LTGRAY
+                            paint.style = android.graphics.Paint.Style.FILL
+                            canvas.drawRect(marginX, currentY, marginX + contentWidth, currentY + 20f, paint)
+                            
+                            textPaint.textSize = 10f
+                            textPaint.isFakeBoldText = true
+                            canvas.drawText("UPC (EAN-13 Barcode)", marginX + 10f, currentY + 14f, textPaint)
+                            canvas.drawText("Modelo / Estilo", marginX + 260f, currentY + 14f, textPaint)
+                            canvas.drawText("Talla", marginX + 440f, currentY + 14f, textPaint)
+                            canvas.drawText("Color", marginX + 520f, currentY + 14f, textPaint)
+                            canvas.drawText("Cant", marginX + 660f, currentY + 14f, textPaint)
+                            
+                            currentY += 20f
+                            
+                            textPaint.isFakeBoldText = false
+                            for (product in products) {
+                                if (currentY > 1130f) {
+                                    pdfDocument.finishPage(page)
+                                    page = pdfDocument.startPage(pageInfo)
+                                    canvas = page.canvas
+                                    currentY = 50f
+                                }
+                                
+                                // Draw row divider
+                                paint.color = android.graphics.Color.rgb(220, 220, 220)
+                                paint.style = android.graphics.Paint.Style.STROKE
+                                paint.strokeWidth = 0.5f
+                                canvas.drawLine(marginX, currentY, marginX + contentWidth, currentY, paint)
+                                
+                                // Row background
+                                paint.color = android.graphics.Color.WHITE
+                                paint.style = android.graphics.Paint.Style.FILL
+                                canvas.drawRect(marginX, currentY, marginX + contentWidth, currentY + 45f, paint)
+                                
+                                // Draw EAN-13 Barcode
+                                drawEan13Barcode(canvas, product.upc, marginX + 10f, currentY + 5f, 25f)
+                                
+                                // Draw product UPC text under barcode
+                                textPaint.textSize = 8f
+                                canvas.drawText(product.upc, marginX + 10f, currentY + 40f, textPaint)
+                                
+                                textPaint.textSize = 10f
+                                canvas.drawText(product.model, marginX + 260f, currentY + 25f, textPaint)
+                                canvas.drawText(product.size, marginX + 440f, currentY + 25f, textPaint)
+                                canvas.drawText(product.color, marginX + 520f, currentY + 25f, textPaint)
+                                canvas.drawText(product.quantity.toString(), marginX + 660f, currentY + 25f, textPaint)
+                                
+                                currentY += 45f
+                            }
+                            
+                            // Bottom border of table
+                            paint.color = android.graphics.Color.rgb(180, 180, 180)
+                            paint.style = android.graphics.Paint.Style.STROKE
+                            paint.strokeWidth = 1f
+                            canvas.drawLine(marginX, currentY, marginX + contentWidth, currentY, paint)
+                            
+                            currentY += 20f
+                        }
+                        
+                        currentY += 15f
+                    }
+                }
+                
+                pdfDocument.finishPage(page)
+                
+                val file = File(context.cacheDir, "reporte_contenedores_${System.currentTimeMillis()}.pdf")
+                file.outputStream().use { out ->
+                    pdfDocument.writeTo(out)
+                }
+                pdfDocument.close()
+                
+                withContext(Dispatchers.Main) {
+                    onFinished(file)
+                }
+            } catch (e: Exception) {
+                Log.e("MainViewModel", "Error generating PDF", e)
+                withContext(Dispatchers.Main) {
+                    _toastMessage.value = "Error al generar PDF: ${e.message}"
+                    onFinished(null)
+                }
+            }
+        }
+    }
+
+    private fun drawCode128Barcode(canvas: android.graphics.Canvas, text: String, x: Float, y: Float, height: Float) {
+        try {
+            val segments = BarcodeEncoder.encodeCode128(text)
+            val paint = android.graphics.Paint().apply {
+                color = android.graphics.Color.BLACK
+                style = android.graphics.Paint.Style.FILL
+            }
+            val moduleWidth = 1.3f
+            var currentX = x
+            
+            for (seg in segments) {
+                val w = seg.first * moduleWidth
+                if (seg.second) { // isBar
+                    canvas.drawRect(currentX, y, currentX + w, y + height, paint)
+                }
+                currentX += w
+            }
+        } catch (e: Exception) {
+            Log.e("MainViewModel", "Error drawing Code 128 barcode: ${e.message}")
+        }
+    }
+
+    private fun drawEan13Barcode(canvas: android.graphics.Canvas, upc: String, x: Float, y: Float, height: Float) {
+        try {
+            val binary = BarcodeEncoder.encodeEan13(upc)
+            val paint = android.graphics.Paint().apply {
+                color = android.graphics.Color.BLACK
+                style = android.graphics.Paint.Style.FILL
+            }
+            val moduleWidth = 1.3f
+            var currentX = x
+            
+            for (char in binary) {
+                if (char == '1') {
+                    canvas.drawRect(currentX, y, currentX + moduleWidth, y + height, paint)
+                }
+                currentX += moduleWidth
+            }
+        } catch (e: Exception) {
+            Log.e("MainViewModel", "Error drawing EAN-13 barcode: ${e.message}")
+        }
     }
 }

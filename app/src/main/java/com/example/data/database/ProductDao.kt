@@ -32,4 +32,25 @@ interface ProductDao {
 
     @Query("DELETE FROM products")
     suspend fun deleteAllProducts()
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertContainer(container: ContainerEntity)
+
+    @Query("SELECT * FROM containers ORDER BY timestamp DESC")
+    fun getAllContainers(): Flow<List<ContainerEntity>>
+
+    @Query("SELECT * FROM containers WHERE sku = :sku LIMIT 1")
+    suspend fun getContainerBySku(sku: String): ContainerEntity?
+
+    @Query("DELETE FROM containers WHERE sku = :sku")
+    suspend fun deleteContainer(sku: String)
+
+    @Query("SELECT * FROM products WHERE containerSku = :containerSku ORDER BY timestamp DESC")
+    fun getProductsInContainer(containerSku: String): Flow<List<ProductEntity>>
+
+    @Query("UPDATE products SET containerSku = :containerSku WHERE id = :productId")
+    suspend fun associateProductWithContainer(productId: Int, containerSku: String?)
+
+    @Query("UPDATE products SET containerSku = null WHERE containerSku = :containerSku")
+    suspend fun clearProductsFromContainer(containerSku: String)
 }

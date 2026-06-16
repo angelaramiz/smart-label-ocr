@@ -24,3 +24,5 @@ memoryagent/
 AGENTS.md
 input.md
 tasks.md
+resouce/
+publish_release.ps1 
