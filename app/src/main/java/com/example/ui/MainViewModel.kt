@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -73,6 +74,20 @@ class MainViewModel(private val repository: ProductRepository, private val conte
         _toastMessage.value = "Contador de tokens reiniciado"
     }
 
+    // Active Container StateFlow
+    private val _activeContainerSku = MutableStateFlow<String?>(prefs.getString("active_container_sku", null))
+    val activeContainerSku: StateFlow<String?> = _activeContainerSku.asStateFlow()
+
+    fun setActiveContainerSku(sku: String?) {
+        prefs.edit().putString("active_container_sku", sku).apply()
+        _activeContainerSku.value = sku
+    }
+
+    // Active Container Name StateFlow
+    val activeContainerName: Flow<String?> = repository.allContainers.map { containers ->
+        containers.find { it.sku == _activeContainerSku.value }?.name
+    }
+
     // Containers list StateFlow
     val containersList: StateFlow<List<ContainerEntity>> = repository.allContainers
         .stateIn(
@@ -81,11 +96,16 @@ class MainViewModel(private val repository: ProductRepository, private val conte
             initialValue = emptyList()
         )
 
-    fun createContainer(name: String) {
+    fun createContainer(name: String, customSku: String? = null) {
         viewModelScope.launch {
             try {
-                val sku = "CONT-${SimpleDateFormat("yyyyMMdd-HHmmss", Locale.getDefault()).format(Date())}"
+                val sku = if (!customSku.isNullOrBlank()) {
+                    customSku.trim().uppercase()
+                } else {
+                    "CONT-${SimpleDateFormat("yyyyMMdd-HHmmss", Locale.getDefault()).format(Date())}"
+                }
                 repository.insertContainer(ContainerEntity(sku = sku, name = name))
+                setActiveContainerSku(sku) // Automatically set as active container!
                 _toastMessage.value = "Contenedor '$name' creado con éxito."
             } catch (e: Exception) {
                 _toastMessage.value = "Error al crear contenedor: ${e.message}"
@@ -295,8 +315,12 @@ class MainViewModel(private val repository: ProductRepository, private val conte
                 if (matches.isNotEmpty()) {
                     val firstMatch = matches.first()
                     val newQty = firstMatch.quantity + 1
-                    repository.updateQuantity(firstMatch, newQty)
-                    onMatched(firstMatch.copy(quantity = newQty))
+                    val updated = firstMatch.copy(
+                        quantity = newQty,
+                        containerSku = _activeContainerSku.value ?: firstMatch.containerSku
+                    )
+                    repository.updateProduct(updated)
+                    onMatched(updated)
                 } else {
                     onNotFound()
                 }
@@ -673,7 +697,8 @@ class MainViewModel(private val repository: ProductRepository, private val conte
                         model = item.extractedModel,
                         size = item.extractedSize,
                         color = "",
-                        quantity = 1
+                        quantity = 1,
+                        containerSku = _activeContainerSku.value
                     )
                     when (res) {
                         is AddResult.NewAdded -> addedCount++
@@ -790,7 +815,7 @@ class MainViewModel(private val repository: ProductRepository, private val conte
     fun commitProduct(upc: String, model: String, size: String, color: String, quantity: Int) {
         viewModelScope.launch {
             try {
-                val res = repository.addOrIncrementProduct(upc, model, size, color, quantity)
+                val res = repository.addOrIncrementProduct(upc, model, size, color, quantity, _activeContainerSku.value)
                 when (res) {
                     is AddResult.NewAdded -> {
                         _toastMessage.value = "Producto nuevo agregado: ${res.product.model} (${res.product.size})"

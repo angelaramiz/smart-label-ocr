@@ -39,7 +39,7 @@ class ProductRepository(private val productDao: ProductDao) {
         return productDao.getAllUniqueModels()
     }
 
-    suspend fun addOrIncrementProduct(upc: String, model: String, size: String, color: String, quantity: Int = 1): AddResult {
+    suspend fun addOrIncrementProduct(upc: String, model: String, size: String, color: String, quantity: Int = 1, containerSku: String? = null): AddResult {
         var cleanedModel = model.trim().uppercase()
         var cleanedColor = color.trim().uppercase()
         val cleanedSize = size.trim().uppercase()
@@ -71,6 +71,7 @@ class ProductRepository(private val productDao: ProductDao) {
             val updated = existing.copy(
                 quantity = existing.quantity + quantity,
                 color = if (cleanedColor.isNotEmpty()) cleanedColor else existing.color,
+                containerSku = containerSku ?: existing.containerSku,
                 timestamp = System.currentTimeMillis() // Move to top of the scan list
             )
             productDao.updateProduct(updated)
@@ -83,7 +84,8 @@ class ProductRepository(private val productDao: ProductDao) {
                 model = if (cleanedModel.isNotEmpty()) cleanedModel else "DESCONOCIDO",
                 size = if (cleanedSize.isNotEmpty()) cleanedSize else "U",
                 color = if (cleanedColor.isNotEmpty()) cleanedColor else "N/A",
-                quantity = quantity
+                quantity = quantity,
+                containerSku = containerSku
             )
             productDao.insertProduct(newProduct)
             AddResult.NewAdded(newProduct)

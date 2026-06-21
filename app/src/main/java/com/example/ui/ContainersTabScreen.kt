@@ -49,6 +49,7 @@ fun ContainersTabScreen(
     val allProducts by viewModel.inventoryList.collectAsState()
 
     var containerNameInput by remember { mutableStateOf("") }
+    var containerSkuInput by remember { mutableStateOf("") }
     var isGeneratingPdf by remember { mutableStateOf(false) }
 
     Column(
@@ -133,28 +134,49 @@ fun ContainersTabScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    OutlinedTextField(
-                        value = containerNameInput,
-                        onValueChange = { containerNameInput = it },
+                    Column(
                         modifier = Modifier.weight(1f),
-                        placeholder = { Text("Ej. Caja de Tenis A", fontSize = 14.sp) },
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = MaterialTheme.colorScheme.primary,
-                            unfocusedBorderColor = MaterialTheme.colorScheme.outline
-                        ),
-                        shape = RoundedCornerShape(8.dp)
-                    )
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = containerNameInput,
+                            onValueChange = { containerNameInput = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            placeholder = { Text("Ej. Caja de Tenis A", fontSize = 14.sp) },
+                            label = { Text("Nombre del Contenedor", fontSize = 12.sp) },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                            ),
+                            shape = RoundedCornerShape(8.dp)
+                        )
+                        OutlinedTextField(
+                            value = containerSkuInput,
+                            onValueChange = { containerSkuInput = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            placeholder = { Text("Auto-generar si se deja vacío", fontSize = 14.sp) },
+                            label = { Text("SKU del Contenedor (Opcional)", fontSize = 12.sp) },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                            ),
+                            shape = RoundedCornerShape(8.dp)
+                        )
+                    }
 
                     Button(
                         onClick = {
                             if (containerNameInput.trim().isNotEmpty()) {
-                                viewModel.createContainer(containerNameInput.trim())
+                                viewModel.createContainer(containerNameInput.trim(), containerSkuInput.trim().takeIf { it.isNotEmpty() })
                                 containerNameInput = ""
+                                containerSkuInput = ""
                             } else {
                                 Toast.makeText(context, "Ingresa un nombre válido", Toast.LENGTH_SHORT).show()
                             }
                         },
+                        modifier = Modifier.align(Alignment.Bottom),
                         shape = RoundedCornerShape(8.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = MaterialTheme.colorScheme.primary

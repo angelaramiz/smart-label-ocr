@@ -280,6 +280,7 @@ fun MainScreen(viewModel: MainViewModel, modifier: Modifier = Modifier) {
     val toastMessage by viewModel.toastMessage.collectAsState()
     val verificationProduct by viewModel.verificationProduct.collectAsState()
     val totalTokens by viewModel.totalTokens.collectAsState()
+    val activeContainerName by viewModel.activeContainerName.collectAsState(initial = null)
 
     val isImporting by viewModel.isImporting.collectAsState()
     val importProgressText by viewModel.importProgressText.collectAsState()
@@ -661,6 +662,167 @@ fun MainScreen(viewModel: MainViewModel, modifier: Modifier = Modifier) {
                                     }
                                 }
                             }
+                        }
+                    }
+
+                    item {
+                        var containerMenuExpanded by remember { mutableStateOf(false) }
+                        var showCreateContainerDialogInTab by remember { mutableStateOf(false) }
+                        val activeContainerNameVal by viewModel.activeContainerName.collectAsState(initial = null)
+                        val containers by viewModel.containersList.collectAsState()
+
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 2.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f)
+                            ),
+                            shape = RoundedCornerShape(14.dp),
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
+                            )
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .padding(12.dp)
+                                    .fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.ShoppingCart,
+                                            contentDescription = "Contenedor Activo",
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column {
+                                        Text(
+                                            text = if (activeContainerNameVal != null) "Contenedor: $activeContainerNameVal" else "Sin Contenedor Asignado",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 13.sp,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Text(
+                                            text = "Los productos escaneados se auto-asignarán aquí",
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                                
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box {
+                                        OutlinedButton(
+                                            onClick = { containerMenuExpanded = true },
+                                            shape = RoundedCornerShape(8.dp),
+                                            modifier = Modifier.height(36.dp),
+                                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp)
+                                        ) {
+                                            Text("Seleccionar", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                            Icon(
+                                                imageVector = Icons.Default.KeyboardArrowDown,
+                                                contentDescription = "Ver",
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                        }
+
+                                        DropdownMenu(
+                                            expanded = containerMenuExpanded,
+                                            onDismissRequest = { containerMenuExpanded = false }
+                                        ) {
+                                            DropdownMenuItem(
+                                                text = { Text("Sin contenedor (Desasociar)") },
+                                                onClick = {
+                                                    viewModel.setActiveContainerSku(null)
+                                                    containerMenuExpanded = false
+                                                }
+                                            )
+                                            containers.forEach { container ->
+                                                DropdownMenuItem(
+                                                    text = { Text("${container.name} (${container.sku})") },
+                                                    onClick = {
+                                                        viewModel.setActiveContainerSku(container.sku)
+                                                        containerMenuExpanded = false
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    Button(
+                                        onClick = { showCreateContainerDialogInTab = true },
+                                        shape = RoundedCornerShape(8.dp),
+                                        modifier = Modifier.height(36.dp),
+                                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp)
+                                    ) {
+                                        Text("Crear", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+
+                        if (showCreateContainerDialogInTab) {
+                            var newName by remember { mutableStateOf("") }
+                            var newSku by remember { mutableStateOf("") }
+                            androidx.compose.material3.AlertDialog(
+                                onDismissRequest = { showCreateContainerDialogInTab = false },
+                                title = { Text("Nuevo Contenedor", fontWeight = FontWeight.Bold) },
+                                text = {
+                                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                        OutlinedTextField(
+                                            value = newName,
+                                            onValueChange = { newName = it },
+                                            label = { Text("Nombre del Contenedor") },
+                                            placeholder = { Text("Ej. Caja de Tenis A") },
+                                            singleLine = true,
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
+                                        OutlinedTextField(
+                                            value = newSku,
+                                            onValueChange = { newSku = it },
+                                            label = { Text("SKU del Contenedor (Opcional)") },
+                                            placeholder = { Text("Dejar vacío para auto-generar") },
+                                            singleLine = true,
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
+                                    }
+                                },
+                                confirmButton = {
+                                    Button(
+                                        onClick = {
+                                            if (newName.trim().isNotEmpty()) {
+                                                viewModel.createContainer(newName.trim(), newSku.trim().takeIf { it.isNotEmpty() })
+                                                showCreateContainerDialogInTab = false
+                                            }
+                                        }
+                                    ) {
+                                        Text("Crear y Seleccionar")
+                                    }
+                                },
+                                dismissButton = {
+                                    OutlinedButton(onClick = { showCreateContainerDialogInTab = false }) {
+                                        Text("Cancelar")
+                                    }
+                                }
+                            )
                         }
                     }
 
@@ -1223,7 +1385,9 @@ fun MainScreen(viewModel: MainViewModel, modifier: Modifier = Modifier) {
                 showCameraViewfinder = false
                 onBarcodeScanResult?.invoke(barcode)
             },
-            onClose = { showCameraViewfinder = false }
+            onClose = { showCameraViewfinder = false },
+            activeContainerName = activeContainerName,
+            onCreateContainer = { name, sku -> viewModel.createContainer(name, sku) }
         )
     }
 }
@@ -3402,7 +3566,9 @@ fun CameraViewfinderScreen(
     scanMode: CameraScanMode = CameraScanMode.OCR_LABEL,
     onPhotoCaptured: (Bitmap) -> Unit,
     onBarcodeCaptured: (String) -> Unit = {},
-    onClose: () -> Unit
+    onClose: () -> Unit,
+    activeContainerName: String? = null,
+    onCreateContainer: (String, String?) -> Unit = { _, _ -> }
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -3783,6 +3949,91 @@ fun CameraViewfinderScreen(
                         )
                     }
                 }
+            }
+
+            var showCreateContainerDialog by remember { mutableStateOf(false) }
+
+            // Floating banner for active container
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = if (scanMode == CameraScanMode.OCR_LABEL) 146.dp else 116.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color.Black.copy(alpha = 0.65f))
+                    .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(12.dp))
+                    .padding(horizontal = 14.dp, vertical = 8.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = if (activeContainerName != null) "📦 Contenedor: $activeContainerName" else "📦 Sin Contenedor",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(MaterialTheme.colorScheme.primary)
+                            .clickable { showCreateContainerDialog = true }
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = "CREAR",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
+                }
+            }
+
+            if (showCreateContainerDialog) {
+                var newName by remember { mutableStateOf("") }
+                var newSku by remember { mutableStateOf("") }
+                androidx.compose.material3.AlertDialog(
+                    onDismissRequest = { showCreateContainerDialog = false },
+                    title = { Text("Nuevo Contenedor", fontWeight = FontWeight.Bold) },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            OutlinedTextField(
+                                value = newName,
+                                onValueChange = { newName = it },
+                                label = { Text("Nombre del Contenedor") },
+                                placeholder = { Text("Ej. Caja de Tenis A") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            OutlinedTextField(
+                                value = newSku,
+                                onValueChange = { newSku = it },
+                                label = { Text("SKU del Contenedor (Opcional)") },
+                                placeholder = { Text("Dejar vacío para auto-generar") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                if (newName.trim().isNotEmpty()) {
+                                    onCreateContainer(newName.trim(), newSku.trim().takeIf { it.isNotEmpty() })
+                                    showCreateContainerDialog = false
+                                }
+                            }
+                        ) {
+                            Text("Crear y Seleccionar")
+                        }
+                    },
+                    dismissButton = {
+                        OutlinedButton(onClick = { showCreateContainerDialog = false }) {
+                            Text("Cancelar")
+                        }
+                    }
+                )
             }
         } else {
             Column(
