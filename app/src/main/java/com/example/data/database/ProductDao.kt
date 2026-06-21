@@ -27,6 +27,12 @@ interface ProductDao {
     @Query("SELECT * FROM products WHERE upc = :upc")
     suspend fun findProductsByUpc(upc: String): List<ProductEntity>
 
+    @Query("SELECT * FROM products WHERE SUBSTR(upc, 1, 8) = :prefix LIMIT 1")
+    suspend fun findProductByUpcPrefix(prefix: String): ProductEntity?
+
+    @Query("SELECT DISTINCT model FROM products")
+    suspend fun getAllUniqueModels(): List<String>
+
     @Query("DELETE FROM products WHERE id = :id")
     suspend fun deleteProduct(id: Int)
 
@@ -50,6 +56,9 @@ interface ProductDao {
 
     @Query("UPDATE products SET containerSku = :containerSku WHERE id = :productId")
     suspend fun associateProductWithContainer(productId: Int, containerSku: String?)
+
+    @Query("UPDATE products SET containerSku = :containerSku WHERE UPPER(TRIM(model)) = UPPER(TRIM(:modelName))")
+    suspend fun associateModelWithContainer(modelName: String, containerSku: String?)
 
     @Query("UPDATE products SET containerSku = null WHERE containerSku = :containerSku")
     suspend fun clearProductsFromContainer(containerSku: String)

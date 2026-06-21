@@ -313,30 +313,34 @@ fun ContainerCard(
                                 Text("Asociar Producto", fontSize = 11.sp)
                             }
 
-                            // Filter products to exclude ones already associated with this container
-                            val unassociatedProducts = allProducts.filter { it.containerSku != container.sku }
+                            // Filter products to exclude ones already associated with this container, and get unique models
+                            val unassociatedModels = allProducts
+                                .filter { it.containerSku != container.sku }
+                                .map { it.model.uppercase().trim() }
+                                .distinct()
 
                             DropdownMenu(
                                 expanded = dropDownExpanded,
                                 onDismissRequest = { dropDownExpanded = false },
                                 modifier = Modifier.heightIn(max = 240.dp)
                             ) {
-                                if (unassociatedProducts.isEmpty()) {
+                                if (unassociatedModels.isEmpty()) {
                                     DropdownMenuItem(
-                                        text = { Text("No hay más productos disponibles") },
+                                        text = { Text("No hay más modelos disponibles") },
                                         onClick = { dropDownExpanded = false }
                                     )
                                 } else {
-                                    unassociatedProducts.forEach { product ->
+                                    unassociatedModels.forEach { modelName ->
                                         DropdownMenuItem(
                                             text = {
                                                 Text(
-                                                    text = "${product.model} [${product.size}] (${product.upc})",
-                                                    fontSize = 12.sp
+                                                    text = "Modelo: $modelName",
+                                                    fontSize = 13.sp,
+                                                    fontWeight = FontWeight.Bold
                                                 )
                                             },
                                             onClick = {
-                                                viewModel.associateProductWithContainer(product.id, container.sku)
+                                                viewModel.associateModelWithContainer(modelName, container.sku)
                                                 dropDownExpanded = false
                                             }
                                         )
@@ -372,7 +376,7 @@ fun ContainerCard(
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .background(Color.White, RoundedCornerShape(6.dp))
+                                        .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(6.dp))
                                         .padding(horizontal = 8.dp, vertical = 6.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
@@ -382,10 +386,11 @@ fun ContainerCard(
                                         Text(
                                             text = "${product.model} - ${product.size}",
                                             fontWeight = FontWeight.Bold,
-                                            fontSize = 13.sp
+                                            fontSize = 13.sp,
+                                            color = MaterialTheme.colorScheme.onSurface
                                         )
                                         Text(
-                                            text = "UPC: ${product.upc} | Color: ${product.color} | Cant: ${product.quantity}",
+                                            text = "UPC: ${product.upc} | Cant: ${product.quantity}",
                                             fontSize = 11.sp,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )

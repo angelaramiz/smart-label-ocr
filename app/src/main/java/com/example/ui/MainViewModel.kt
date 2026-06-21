@@ -25,6 +25,10 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.barcode.BarcodeScanning
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 
 sealed class ScanState {
     object Idle : ScanState()
@@ -111,6 +115,21 @@ class MainViewModel(private val repository: ProductRepository, private val conte
                 }
             } catch (e: Exception) {
                 _toastMessage.value = "Error al asociar producto: ${e.message}"
+            }
+        }
+    }
+
+    fun associateModelWithContainer(modelName: String, containerSku: String?) {
+        viewModelScope.launch {
+            try {
+                repository.associateModelWithContainer(modelName, containerSku)
+                if (containerSku != null) {
+                    _toastMessage.value = "Todos los productos del modelo '$modelName' fueron asignados al contenedor."
+                } else {
+                    _toastMessage.value = "Modelo desasociado del contenedor."
+                }
+            } catch (e: Exception) {
+                _toastMessage.value = "Error al asociar modelo: ${e.message}"
             }
         }
     }
@@ -250,7 +269,7 @@ class MainViewModel(private val repository: ProductRepository, private val conte
                         continue
                     }
 
-                    // Insert or increment in DB
+                    // Insert or increment in DB (color is empty, it will be split from the model string if it contains a hyphen)
                     repository.addOrIncrementProduct(upc, model, size, "", qty)
                     successCount++
                 }
@@ -470,6 +489,52 @@ class MainViewModel(private val repository: ProductRepository, private val conte
                 
                 _isBatchProcessing.value = true // Ensure still active
                 
+                // Pre-scan local barcode first!
+                _batchProgressText.value = "Pre-escaneando barras en ${i + 1} de ${list.size}..."
+                val localBarcode = scanBarcodeFromBitmap(item.bitmap)
+                if (localBarcode != null && localBarcode.isNotEmpty()) {
+                    // 1. Check if the UPC already exists in DB
+                    val dbMatches = repository.findProductsByUpc(localBarcode)
+                    if (dbMatches.isNotEmpty()) {
+                        val matchedProduct = dbMatches.first()
+                        _batchQueue.value = _batchQueue.value.map {
+                            if (it.id == item.id) {
+                                it.copy(
+                                    status = BatchItemStatus.SUCCESS,
+                                    extractedUpc = localBarcode,
+                                    extractedModel = matchedProduct.model,
+                                    extractedSize = matchedProduct.size,
+                                    errorMessage = null
+                                )
+                            } else {
+                                it
+                            }
+                        }
+                        continue // Skip Vision AI completely!
+                    }
+                    
+                    // 2. Check if another item in the current batch queue has already successfully resolved this UPC
+                    val dupResolved = _batchQueue.value.firstOrNull {
+                        it.id != item.id && it.extractedUpc == localBarcode && it.status == BatchItemStatus.SUCCESS
+                    }
+                    if (dupResolved != null) {
+                        _batchQueue.value = _batchQueue.value.map {
+                            if (it.id == item.id) {
+                                it.copy(
+                                    status = BatchItemStatus.SUCCESS,
+                                    extractedUpc = localBarcode,
+                                    extractedModel = dupResolved.extractedModel,
+                                    extractedSize = dupResolved.extractedSize,
+                                    errorMessage = null
+                                )
+                            } else {
+                                it
+                            }
+                        }
+                        continue // Skip Vision AI completely!
+                    }
+                }
+                
                 var attempts = 0
                 var success = false
                 var finalResult: OcrResult? = null
@@ -494,11 +559,29 @@ class MainViewModel(private val repository: ProductRepository, private val conte
                         customHfKey = _customHfKey.value,
                         selectedProvider = _selectedProvider.value
                     )
-                    finalResult = result
                     
-                    val tokens = when (result) {
-                        is OcrResult.Success -> result.tokensUsed
-                        is OcrResult.Error -> result.tokensUsed
+                    // Apply family auto-completion / prefix-matching based on 8-digit prefix
+                    val processedResult = if (result is OcrResult.Success) {
+                        val upcToUse = if (localBarcode != null && localBarcode.isNotEmpty()) localBarcode else result.upc
+                        var modelToUse = result.model
+                        
+                        if (upcToUse.length >= 8) {
+                            val prefix = upcToUse.substring(0, 8)
+                            val prefixMatch = repository.findProductByUpcPrefix(prefix)
+                            if (prefixMatch != null) {
+                                modelToUse = prefixMatch.model
+                            }
+                        }
+                        result.copy(upc = upcToUse, model = modelToUse)
+                    } else {
+                        result
+                    }
+                    
+                    finalResult = processedResult
+                    
+                    val tokens = when (processedResult) {
+                        is OcrResult.Success -> processedResult.tokensUsed
+                        is OcrResult.Error -> processedResult.tokensUsed
                     }
                     if (tokens > 0) {
                         val newTotal = _totalTokens.value + tokens
@@ -507,9 +590,9 @@ class MainViewModel(private val repository: ProductRepository, private val conte
                         _lastScanTokens.value = tokens
                     }
                     
-                    if (result is OcrResult.Success) {
+                    if (processedResult is OcrResult.Success) {
                         success = true
-                    } else if (result is OcrResult.Error && result.errorCode == 429) {
+                    } else if (processedResult is OcrResult.Error && processedResult.errorCode == 429) {
                         if (attempts < 3) {
                             val backoffTimeMs = 15_000L * attempts
                             var ticks = backoffTimeMs / 1000L
@@ -620,6 +703,30 @@ class MainViewModel(private val repository: ProductRepository, private val conte
             _scanState.value = ScanState.Processing
             _verificationProduct.value = null
 
+            // Pre-scan local barcode first!
+            val localBarcode = scanBarcodeFromBitmap(bitmap)
+            if (localBarcode != null && localBarcode.isNotEmpty()) {
+                val dbMatches = repository.findProductsByUpc(localBarcode)
+                if (dbMatches.isNotEmpty()) {
+                    val dbProduct = dbMatches.first()
+                    _scanState.value = ScanState.Success(
+                        upc = localBarcode,
+                        model = dbProduct.model,
+                        size = dbProduct.size,
+                        color = dbProduct.color
+                    )
+                    _verificationProduct.value = ProductEntity(
+                        upc = localBarcode,
+                        model = dbProduct.model,
+                        size = dbProduct.size,
+                        color = dbProduct.color,
+                        quantity = 1
+                    )
+                    _toastMessage.value = "Producto pre-escaneado localmente de la base de datos (0 tokens)"
+                    return@launch
+                }
+            }
+
             when (val result = GeminiService.analyzeLabelImage(
                 bitmap = bitmap,
                 customGeminiKey = _customGeminiKey.value,
@@ -628,6 +735,17 @@ class MainViewModel(private val repository: ProductRepository, private val conte
                 selectedProvider = _selectedProvider.value
             )) {
                 is OcrResult.Success -> {
+                    val upcToUse = if (localBarcode != null && localBarcode.isNotEmpty()) localBarcode else result.upc
+                    var modelToUse = result.model
+                    
+                    if (upcToUse.length >= 8) {
+                        val prefix = upcToUse.substring(0, 8)
+                        val prefixMatch = repository.findProductByUpcPrefix(prefix)
+                        if (prefixMatch != null) {
+                            modelToUse = prefixMatch.model
+                        }
+                    }
+
                     val tokens = result.tokensUsed
                     if (tokens > 0) {
                         val newTotal = _totalTokens.value + tokens
@@ -637,15 +755,15 @@ class MainViewModel(private val repository: ProductRepository, private val conte
                         _toastMessage.value = "Tokens usados en escaneo: $tokens"
                     }
                     _scanState.value = ScanState.Success(
-                        upc = result.upc,
-                        model = result.model,
+                        upc = upcToUse,
+                        model = modelToUse,
                         size = result.size,
                         color = result.color
                     )
                     // Populate verification model to let user double-check or adjust before saving
                     _verificationProduct.value = ProductEntity(
-                        upc = result.upc,
-                        model = result.model,
+                        upc = upcToUse,
+                        model = modelToUse,
                         size = result.size,
                         color = result.color,
                         quantity = 1
@@ -726,8 +844,14 @@ class MainViewModel(private val repository: ProductRepository, private val conte
         val grouped = list.groupBy { it.model }
         for ((model, items) in grouped) {
             for (item in items) {
+                // Reconstruct composite model name if color is present
+                val compositeModel = if (item.color.isNotEmpty() && item.color != "N/A") {
+                    "${item.model}-${item.color}"
+                } else {
+                    item.model
+                }
                 // Clean fields from commas to prevent corrupt CSV formats
-                val cleanModel = item.model.replace(",", ";").replace("\"", "'")
+                val cleanModel = compositeModel.replace(",", ";").replace("\"", "'")
                 val cleanUpc = item.upc.replace(",", ";").replace("\"", "'")
                 val cleanSize = item.size.replace(",", ";").replace("\"", "'")
                 sb.append("$cleanUpc,$cleanModel,$cleanSize,${item.quantity}\n")
@@ -941,7 +1065,7 @@ class MainViewModel(private val repository: ProductRepository, private val conte
                 color = android.graphics.Color.BLACK
                 style = android.graphics.Paint.Style.FILL
             }
-            val moduleWidth = 1.3f
+            val moduleWidth = 1.8f
             var currentX = x
             
             for (char in binary) {
@@ -952,6 +1076,29 @@ class MainViewModel(private val repository: ProductRepository, private val conte
             }
         } catch (e: Exception) {
             Log.e("MainViewModel", "Error drawing EAN-13 barcode: ${e.message}")
+        }
+    }
+
+    private suspend fun scanBarcodeFromBitmap(bitmap: Bitmap): String? = suspendCancellableCoroutine { continuation ->
+        try {
+            val image = InputImage.fromBitmap(bitmap, 0)
+            val scanner = BarcodeScanning.getClient()
+            scanner.process(image)
+                .addOnSuccessListener { barcodes ->
+                    if (continuation.isActive) {
+                        val raw = barcodes.firstOrNull()?.rawValue
+                        continuation.resume(raw)
+                    }
+                }
+                .addOnFailureListener { e ->
+                    if (continuation.isActive) {
+                        continuation.resume(null)
+                    }
+                }
+        } catch (e: Exception) {
+            if (continuation.isActive) {
+                continuation.resume(null)
+            }
         }
     }
 }

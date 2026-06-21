@@ -41,6 +41,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.foundation.layout.Arrangement
@@ -295,7 +297,6 @@ fun MainScreen(viewModel: MainViewModel, modifier: Modifier = Modifier) {
     var manualFormModel by remember { mutableStateOf("") }
     var manualFormUpc by remember { mutableStateOf("") }
     var manualFormSize by remember { mutableStateOf("") }
-    var manualFormColor by remember { mutableStateOf("") }
     var manualFormQty by remember { mutableStateOf(1) }
     var hideManualDialogTemporarily by remember { mutableStateOf(false) }
 
@@ -1032,8 +1033,6 @@ fun MainScreen(viewModel: MainViewModel, modifier: Modifier = Modifier) {
             onUpcChange = { manualFormUpc = it },
             size = manualFormSize,
             onSizeChange = { manualFormSize = it },
-            color = manualFormColor,
-            onColorChange = { manualFormColor = it },
             qty = manualFormQty,
             onQtyChange = { manualFormQty = it },
             onDismiss = {
@@ -1041,16 +1040,14 @@ fun MainScreen(viewModel: MainViewModel, modifier: Modifier = Modifier) {
                 manualFormModel = ""
                 manualFormUpc = ""
                 manualFormSize = ""
-                manualFormColor = ""
                 manualFormQty = 1
             },
             onConfirm = {
-                viewModel.commitProduct(manualFormUpc, manualFormModel, manualFormSize, manualFormColor, manualFormQty)
+                viewModel.commitProduct(manualFormUpc, manualFormModel, manualFormSize, "", manualFormQty)
                 showManualAddDialog = false
                 manualFormModel = ""
                 manualFormUpc = ""
                 manualFormSize = ""
-                manualFormColor = ""
                 manualFormQty = 1
             },
             onScanBarcodeClick = {
@@ -2047,6 +2044,47 @@ fun ProductModelSpreadsheetCard(
 ) {
     var expanded by remember { mutableStateOf(true) }
 
+    val sortedProducts = remember(productsList) {
+        val sizeOrder = listOf("XXS", "XS", "S", "M", "L", "XL", "XXL")
+        productsList.sortedWith { p1, p2 ->
+            val c1 = p1.color.trim().uppercase()
+            val c2 = p2.color.trim().uppercase()
+            if (c1 != c2) {
+                c1.compareTo(c2)
+            } else {
+                val s1 = p1.size.trim().uppercase()
+                val s2 = p2.size.trim().uppercase()
+
+                val n1 = s1.toDoubleOrNull()
+                val n2 = s2.toDoubleOrNull()
+
+                if (n1 != null && n2 != null) {
+                    n1.compareTo(n2)
+                } else if (n1 != null) {
+                    1
+                } else if (n2 != null) {
+                    -1
+                } else {
+                    val idx1 = sizeOrder.indexOf(s1)
+                    val idx2 = sizeOrder.indexOf(s2)
+                    if (idx1 != -1 && idx2 != -1) {
+                        idx1.compareTo(idx2)
+                    } else if (idx1 != -1) {
+                        -1
+                    } else if (idx2 != -1) {
+                        1
+                    } else {
+                        s1.compareTo(s2)
+                    }
+                }
+            }
+        }
+    }
+
+    val uniqueColors = remember(sortedProducts) {
+        sortedProducts.map { it.color.trim().uppercase() }.distinct()
+    }
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
@@ -2109,15 +2147,27 @@ fun ProductModelSpreadsheetCard(
                 enter = fadeIn() + expandVertically(),
                 exit = fadeOut() + shrinkVertically()
             ) {
-                Column(modifier = Modifier.padding(8.dp)) {
+                val horizontalScrollState = rememberScrollState()
+                Column(
+                    modifier = Modifier
+                        .padding(8.dp)
+                        .horizontalScroll(horizontalScrollState)
+                        .width(580.dp)
+                ) {
                     // Excel styled Grid Spreadsheet Header
                     ExcelSpreadsheetHeader()
 
                     // Rows
-                    productsList.forEachIndexed { idx, product ->
+                    sortedProducts.forEachIndexed { idx, product ->
+                        val isZebra = if (uniqueColors.size > 1) {
+                            val colorIdx = uniqueColors.indexOf(product.color.trim().uppercase())
+                            colorIdx % 2 == 1
+                        } else {
+                            idx % 2 == 1
+                        }
                         ExcelSpreadsheetRow(
                             product = product,
-                            isZebra = idx % 2 == 1,
+                            isZebra = isZebra,
                             index = idx + 1,
                             onIncrement = { onIncrement(product) },
                             onDecrement = { onDecrement(product) },
@@ -2218,6 +2268,21 @@ fun ExcelSpreadsheetHeader() {
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
+        // color header cell
+        Box(
+            modifier = Modifier
+                .weight(1.8f)
+                .height(30.dp)
+                .cellBorder(color = MaterialTheme.colorScheme.outlineVariant),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "COLOR",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
         // stock header cell
         Box(
             modifier = Modifier
@@ -2264,7 +2329,7 @@ fun ExcelSpreadsheetRow(
         modifier = Modifier
             .fillMaxWidth()
             .height(40.dp)
-            .background(if (isZebra) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surface)
+            .background(if (isZebra) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f) else MaterialTheme.colorScheme.surface)
             .border(width = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -2324,6 +2389,25 @@ fun ExcelSpreadsheetRow(
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface,
                 textAlign = TextAlign.Center
+            )
+        }
+
+        // Color
+        Box(
+            modifier = Modifier
+                .weight(1.8f)
+                .height(40.dp)
+                .cellBorder(color = MaterialTheme.colorScheme.outlineVariant),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = if (product.color.isEmpty() || product.color == "N/A") "-" else product.color,
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
 
@@ -2407,8 +2491,6 @@ fun ManualFormDialog(
     onUpcChange: (String) -> Unit,
     size: String,
     onSizeChange: (String) -> Unit,
-    color: String,
-    onColorChange: (String) -> Unit,
     qty: Int,
     onQtyChange: (Int) -> Unit,
     onDismiss: () -> Unit,
@@ -2470,16 +2552,6 @@ fun ManualFormDialog(
                     value = size,
                     onValueChange = onSizeChange,
                     label = { Text("Talla") },
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = textFieldColors,
-                    singleLine = true
-                )
-
-                OutlinedTextField(
-                    value = color,
-                    onValueChange = onColorChange,
-                    label = { Text("Color") },
                     modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
                     shape = RoundedCornerShape(12.dp),
                     colors = textFieldColors,

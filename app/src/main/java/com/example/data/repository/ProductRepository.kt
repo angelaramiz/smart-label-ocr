@@ -27,11 +27,43 @@ class ProductRepository(private val productDao: ProductDao) {
         productDao.associateProductWithContainer(productId, containerSku)
     }
 
+    suspend fun associateModelWithContainer(modelName: String, containerSku: String?) {
+        productDao.associateModelWithContainer(modelName, containerSku)
+    }
+
+    suspend fun findProductByUpcPrefix(prefix: String): ProductEntity? {
+        return productDao.findProductByUpcPrefix(prefix)
+    }
+
+    suspend fun getAllUniqueModels(): List<String> {
+        return productDao.getAllUniqueModels()
+    }
+
     suspend fun addOrIncrementProduct(upc: String, model: String, size: String, color: String, quantity: Int = 1): AddResult {
-        val cleanedModel = model.trim().uppercase()
+        var cleanedModel = model.trim().uppercase()
+        var cleanedColor = color.trim().uppercase()
         val cleanedSize = size.trim().uppercase()
-        val cleanedColor = color.trim().uppercase()
         val cleanedUpc = upc.trim()
+
+        // Split by hyphen to extract color if present in the model string
+        if (cleanedModel.contains("-")) {
+            val parts = cleanedModel.split("-", limit = 2)
+            cleanedModel = parts[0].trim()
+            if (cleanedColor.isEmpty() || cleanedColor == "N/A") {
+                cleanedColor = parts[1].trim()
+            }
+        }
+
+        if (cleanedModel.isNotEmpty()) {
+            val uniqueModels = productDao.getAllUniqueModels()
+            for (existingModel in uniqueModels) {
+                val existingUpper = existingModel.uppercase()
+                if (getLevenshteinSimilarity(cleanedModel, existingUpper) >= 0.8) {
+                    cleanedModel = existingUpper
+                    break
+                }
+            }
+        }
 
         // Check if matching exact UPC, model and size already exists.
         val existing = productDao.findProductExact(cleanedUpc, cleanedSize, cleanedModel)
@@ -56,6 +88,37 @@ class ProductRepository(private val productDao: ProductDao) {
             productDao.insertProduct(newProduct)
             AddResult.NewAdded(newProduct)
         }
+    }
+
+    private fun getLevenshteinSimilarity(s1: String, s2: String): Double {
+        val longer = if (s1.length > s2.length) s1 else s2
+        val shorter = if (s1.length > s2.length) s2 else s1
+        val longerLength = longer.length
+        if (longerLength == 0) return 1.0
+        return (longerLength - editDistance(longer, shorter)) / longerLength.toDouble()
+    }
+
+    private fun editDistance(s1: String, s2: String): Int {
+        val costs = IntArray(s2.length + 1)
+        for (i in 0..s1.length) {
+            var lastValue = i
+            for (j in 0..s2.length) {
+                if (i == 0) {
+                    costs[j] = j
+                } else {
+                    if (j > 0) {
+                        var newValue = costs[j - 1]
+                        if (s1[i - 1] != s2[j - 1]) {
+                            newValue = minOf(newValue, lastValue, costs[j]) + 1
+                        }
+                        costs[j - 1] = lastValue
+                        lastValue = newValue
+                    }
+                }
+            }
+            if (i > 0) costs[s2.length] = lastValue
+        }
+        return costs[s2.length]
     }
 
     suspend fun findProductsByUpc(upc: String): List<ProductEntity> {
